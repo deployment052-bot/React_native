@@ -1,13 +1,13 @@
 const passport = require("passport");
 const GoogleStrategy = require("passport-google-oauth20").Strategy;
+const FacebookStrategy = require("passport-facebook").Strategy;
 const jwt = require("jsonwebtoken");
 const User = require("../model/user");
 
 const BASE_URL =
   process.env.BACKEND_URL?.replace(/\/$/, "") || "http://localhost:5000";
-const FRONTEND_URL =
-  process.env.FRONTEND_URL ||
-  "https://whimsical-fenglisu-4a7b67.netlify.app";
+
+
 
 passport.use(
   new GoogleStrategy(
@@ -16,10 +16,13 @@ passport.use(
       clientSecret: process.env.GOOGLE_CLIENT_SECRET,
       callbackURL: `${BASE_URL}/auth/google/callback`,
     },
-    async (_, __, profile, done) => {
+    async (accessToken, refreshToken, profile, done) => {
       try {
-        const email = profile.emails?.[0]?.value;
-        if (!email) return done(new Error("Google account has no email"), null);
+        if (!profile.emails?.length) {
+          return done(new Error("No email from Google"), null);
+        }
+
+        const email = profile.emails[0].value;
 
         let user = await User.findOne({ email });
 
@@ -28,28 +31,33 @@ passport.use(
             googleId: profile.id,
             firstName: profile.name?.givenName || "",
             lastName: profile.name?.familyName || "",
-            displayName: profile.displayName || "",
             email,
             avatar: profile.photos?.[0]?.value || "",
+            authProvider: "google",
             role: "client",
+            googleAccessToken: accessToken,
+            googleRefreshToken: refreshToken,
           });
         } else {
           user.googleId = profile.id;
           user.avatar = profile.photos?.[0]?.value || user.avatar;
-          user.displayName = profile.displayName || user.displayName;
+          user.googleAccessToken = accessToken;
+          user.googleRefreshToken = refreshToken;
           await user.save();
         }
 
-      
+        // Create backend JWT
         const token = jwt.sign(
           { id: user._id, role: user.role },
           process.env.JWT_SECRET,
           { expiresIn: "7d" }
         );
 
-        return done(null, { ...user._doc, token });
+        // Pass token along with user object
+        return done(null, { ...user.toObject(), token });
+
       } catch (err) {
-        console.error("Google Auth Error:", err);
+        console.error("Google Strategy Error:", err);
         return done(err, null);
       }
     }
@@ -57,11 +65,58 @@ passport.use(
 );
 
 
-passport.serializeUser((user, done) => {
-  done(null, user);
-});
-passport.deserializeUser((user, done) => {
-  done(null, user);
-});
+
+
+
+passport.use(
+  new FacebookStrategy(
+    {
+      clientID: process.env.FACEBOOK_CLIENT_ID,
+      clientSecret: process.env.FACEBOOK_CLIENT_SECRET,
+      callbackURL: `${BASE_URL}/auth/facebook/callback`,
+      profileFields: ["id", "emails", "name", "photos"],
+    },
+    async (accessToken, refreshToken, profile, done) => {
+      try {
+        const email =
+          profile.emails?.[0]?.value || `fb_${profile.id}@facebook.com`;
+
+        let user = await User.findOne({ email });
+
+        if (!user) {
+          user = await User.create({
+            facebookId: profile.id,
+            firstName: profile.name?.givenName || "",
+            lastName: profile.name?.familyName || "",
+            email,
+            avatar: profile.photos?.[0]?.value || "",
+            authProvider: "facebook",
+            role: "client",
+          });
+        } else {
+          user.facebookId = profile.id;
+          user.avatar = profile.photos?.[0]?.value || user.avatar;
+          await user.save();
+        }
+
+        // 🔥 Generate JWT TOKEN for facebook too
+        const token = jwt.sign(
+          { id: user._id, role: user.role },
+          process.env.JWT_SECRET,
+          { expiresIn: "7d" }
+        );
+
+        return done(null, { ...user.toObject(), token });
+
+      } catch (err) {
+        console.error("Facebook Strategy Error:", err);
+        return done(err, null);
+      }
+    }
+  )
+);
+
+passport.serializeUser((user, done) => done(null, user));
+passport.deserializeUser((obj, done) => done(null, obj));
 
 module.exports = passport;
