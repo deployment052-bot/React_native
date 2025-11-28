@@ -1,7 +1,7 @@
 const jwt = require("jsonwebtoken");
 const User = require("../model/user");
 
-
+// 🔐 Verify JWT
 exports.protect = async (req, res, next) => {
   try {
     let token;
@@ -23,6 +23,7 @@ exports.protect = async (req, res, next) => {
     res.status(401).json({ message: "Invalid or expired token" });
   }
 };
+
 
 exports.authorize = (...roles) => {
   return (req, res, next) => {

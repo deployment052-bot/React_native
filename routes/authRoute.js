@@ -18,41 +18,30 @@ const router = express.Router();
 router.post("/client-register", registerClient);
 router.post("/technician-register", protect, registerTechnician);
 router.post("/login", login);
-router.post("/verify-otp",protect, verifyEmail);
+router.post("/verify-otp", verifyEmail);
 router.get("/profile",protect, getProfile);
 router.post("/admin-register", registeradmin);
 
+
+
+
 router.get(
   "/google",
-  (req, res, next) => {
-    const role = req.query.role || "client";
-    if (role !== "client") {
-      return res.status(403).json({ message: "Google login allowed only for clients" });
-    }
-    next();
-  },
-  passport.authenticate("google", { scope: ["profile", "email"] })
+  passport.authenticate("google", {
+    scope: ["profile", "email"],
+  })
 );
-
 
 router.get(
   "/google/callback",
   passport.authenticate("google", { failureRedirect: "/auth/failure" }),
   (req, res) => {
     try {
-      const token = req.user?.token;
-
-      if (!token) {
-        console.error("❌ Google Login Error: Token missing in req.user");
-        return res.redirect(`${FRONTEND_URL}/?error=token_missing`);
-      }
-
-      const frontend = process.env.FRONTEND_URL || "https://whimsical-fenglisu-4a7b67.netlify.app";
-
-      return res.redirect(`${frontend}/?token=${token}`);
+      const token = req.user.token;
+      return res.redirect(`${FRONTEND_URL}/?authToken=${token}`);
     } catch (err) {
       console.error("Google Callback Error:", err);
-      res.status(500).json({ message: "Server error during Google login" });
+      return res.status(500).json({ message: "Server error during Google login" });
     }
   }
 );

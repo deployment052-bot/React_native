@@ -40,20 +40,14 @@ passport.use(
           await user.save();
         }
 
-        // 🔥 Generate token
+      
         const token = jwt.sign(
           { id: user._id, role: user.role },
           process.env.JWT_SECRET,
           { expiresIn: "7d" }
         );
 
-        // 🔥 Ye FINALE FIX — user ke object me token attach
-        const userData = {
-          ...user._doc,
-          token,
-        };
-
-        return done(null, userData);
+        return done(null, { ...user._doc, token });
       } catch (err) {
         console.error("Google Auth Error:", err);
         return done(err, null);
@@ -66,7 +60,6 @@ passport.use(
 passport.serializeUser((user, done) => {
   done(null, user);
 });
-
 passport.deserializeUser((user, done) => {
   done(null, user);
 });

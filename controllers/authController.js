@@ -1,6 +1,7 @@
 const User = require("../model/user");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
+const axios=require('axios')
 const sendEmail = require("../utils/sendemail");
 
 
@@ -110,11 +111,12 @@ exports.registerClient = async (req, res) => {
 
     let user = await User.findOne({ email });
 
-  
+    // If already verified
     if (user && user.isEmailVerified) {
       return res.status(400).json({ message: "Email already registered and verified." });
     }
 
+    // Hash password if new or updating
     const hashedPassword = await bcrypt.hash(password, 10);
 
     if (!user) {
@@ -127,7 +129,7 @@ exports.registerClient = async (req, res) => {
         password: hashedPassword,
       });
     } else {
- 
+      // Update existing unverified record
       user.set({
         firstName,
         lastName,
@@ -137,6 +139,7 @@ exports.registerClient = async (req, res) => {
       });
     }
 
+    // Clear technician fields if exist
     user.specialization = undefined;
     user.experience = undefined;
     user.availability = undefined;
@@ -150,10 +153,30 @@ exports.registerClient = async (req, res) => {
       email,
     });
   } catch (err) {
-    console.error("Client registration error:", err.message);
+    console.error("❌ Client registration error:", err.message);
     res.status(500).json({ message: "Registration failed. Try again later." });
   }
 };
+
+
+
+// Helper to get coordinates from location string
+async function getCoordinates(location) {
+  try {
+    const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(location)}`;
+    const response = await axios.get(url, { headers: { "User-Agent": "MyApp/1.0" } });
+    if (response.data && response.data.length > 0) {
+      return {
+        lat: parseFloat(response.data[0].lat),
+        lng: parseFloat(response.data[0].lon),
+      };
+    }
+    return null;
+  } catch (err) {
+    console.error("Geocoding error:", err.message);
+    return null;
+  }
+}
 
 exports.registerTechnician = async (req, res) => {
   try {
@@ -175,10 +198,8 @@ exports.registerTechnician = async (req, res) => {
     if (password !== confirmPassword)
       return res.status(400).json({ message: "Passwords do not match." });
 
-    if (!specialization || !experience)
-      return res
-        .status(400)
-        .json({ message: "Specialization and experience are required." });
+    if (!specialization || !experience || !location)
+      return res.status(400).json({ message: "Specialization, experience, and location are required." });
 
     let user = await User.findOne({ email });
 
@@ -186,6 +207,14 @@ exports.registerTechnician = async (req, res) => {
       return res.status(400).json({ message: "Email already registered and verified." });
 
     const hashedPassword = await bcrypt.hash(password, 10);
+
+    // Get coordinates automatically from location
+    const coordinates = await getCoordinates(location);
+    if (!coordinates) return res.status(400).json({ message: "Could not fetch coordinates for this location." });
+
+    const normalizedSpecialization = Array.isArray(specialization)
+      ? specialization.map((s) => s.trim().toLowerCase())
+      : specialization.split(",").map((s) => s.trim().toLowerCase());
 
     if (!user) {
       user = new User({
@@ -195,27 +224,24 @@ exports.registerTechnician = async (req, res) => {
         phone,
         password: hashedPassword,
         role: "technician",
-        specialization: Array.isArray(specialization)
-          ? specialization.map((s) => s.trim().toLowerCase())
-          : specialization.split(",").map((s) => s.trim().toLowerCase()),
+        specialization: normalizedSpecialization,
         experience,
         location,
+        coordinates, // lat/lng saved automatically
         availability: true,
         onDuty: false,
         technicianStatus: "available",
       });
     } else {
-    
       user.set({
         firstName,
         lastName,
         phone,
         password: hashedPassword,
-        specialization: Array.isArray(specialization)
-          ? specialization.map((s) => s.trim().toLowerCase())
-          : specialization.split(",").map((s) => s.trim().toLowerCase()),
+        specialization: normalizedSpecialization,
         experience,
         location,
+        coordinates,
         availability: true,
         onDuty: false,
         technicianStatus: "available",
@@ -223,17 +249,20 @@ exports.registerTechnician = async (req, res) => {
       });
     }
 
+    await user.save(); // save to DB
     await sendVerificationOTP(user, email, firstName);
 
     res.status(200).json({
       message: "Technician registration started. OTP sent to your email.",
       email,
     });
+
   } catch (err) {
-    console.error("Technician registration error:", err.message);
+    console.error("❌ Technician registration error:", err.message);
     res.status(500).json({ message: "Registration failed. Try again later." });
   }
 };
+
 
 
 exports.verifyEmail = async (req, res) => {
@@ -256,7 +285,8 @@ exports.verifyEmail = async (req, res) => {
       return res.status(400).json({ message: "Invalid OTP." });
 
     user.isEmailVerified = true;
- 
+    user.emailOTP = undefined;
+    user.emailOTPExpires = undefined;
     await user.save();
 
     res.status(200).json({ message: "Email verified successfully! You can now log in." });
