@@ -1,0 +1,104 @@
+services:
+  - type: web
+    name: fastresponse-backend
+    env: node
+    branch: main
+    region: oregon
+    buildCommand: npm install
+    startCommand: node server.js
+
+    plan: free
+    numInstances: 1
+
+    envVars:
+      - key: NODE_ENV
+        value: production
+
+      - key: PORT
+        value: 5000
+
+      # === CORE BACKEND CONFIG ===
+      - key: MONGO_URL
+        sync: false
+
+      - key: JWT_SECRET
+        sync: false
+
+      - key: SESSION_SECRET
+        sync: false
+
+      # === FRONTEND / BACKEND URLs ===
+      - key: FRONTEND_URL
+        value: https://whimsical-fenglisu-4a7b67.netlify.app
+
+      - key: BACKEND_URL
+        value: https://fastresponse.onrender.com
+
+      # === GOOGLE OAUTH ===
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+
+      - key: GOOGLE_CLIENT_SECRET
+        sync: false
+
+      # === FACEBOOK OAUTH ===
+      - key: FACEBOOK_CLIENT_ID
+        sync: false
+
+      - key: FACEBOOK_CLIENT_SECRET
+        sync: false
+
+      # === SMTP / EMAIL ===
+      - key: SMTP_USER
+        sync: false
+
+      - key: SMTP_PASS
+        sync: false
+
+      - key: SENDGRID_API_KEY
+        sync: false
+
+      - key: EMAIL_FROM
+        sync: false
+
+      # === PAYMENT / RAZORPAY ===
+      - key: GATEWAY_KEY_ID
+        sync: false
+
+      - key: GATEWAY_KEY_SECRET
+        sync: false
+
+      - key: GATEWAY_WEBHOOK_SECRET
+        sync: false
+
+      # === ORIGINS ===
+      - key: ORIGIN
+        value: "http://localhost:5173,https://whimsical-fenglisu-4a7b67.netlify.app"
+
+      # === MAP KEYS ===
+      - key: GOOGLE_MAPS_API_KEY
+        sync: false
+
+      - key: MAPPLS_REST_KEY
+        sync: false
+
+      # === MERCHANT / UPI ===
+      - key: MERCHANT_VPA
+        sync: false
+
+      - key: MERCHANT_NAME
+        sync: false
+
+      # === CLOUDINARY ===
+      - key: cloud_n
+        sync: false
+
+      - key: api_k
+        sync: false
+
+      - key: api_se
+        sync: false
+
+      # === UPI ID ===
+      - key: upi_id
+        sync: false
