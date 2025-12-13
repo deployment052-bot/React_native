@@ -6,10 +6,18 @@ const sendEmail = require("../utils/sendemail");
 
 
 const generateToken = (user) => {
-  return jwt.sign({ id: user._id, role: user.role }, process.env.JWT_SECRET, {
-    expiresIn: "7d",
-  });
+  return jwt.sign(
+    {
+      id: user._id,
+      email: user.email,
+      name: user.name,
+      role: user.role 
+    },
+    process.env.JWT_SECRET,
+    { expiresIn: "7d" }
+  );
 };
+
 
 
 const sendVerificationOTP = async (user, email, name) => {
@@ -208,7 +216,7 @@ exports.registerTechnician = async (req, res) => {
 
     const hashedPassword = await bcrypt.hash(password, 10);
 
-    // Get coordinates automatically from location
+    
     const coordinates = await getCoordinates(location);
     if (!coordinates) return res.status(400).json({ message: "Could not fetch coordinates for this location." });
 
@@ -258,7 +266,7 @@ exports.registerTechnician = async (req, res) => {
     });
 
   } catch (err) {
-    console.error("❌ Technician registration error:", err.message);
+    console.error(" Technician registration error:", err.message);
     res.status(500).json({ message: "Registration failed. Try again later." });
   }
 };
@@ -321,17 +329,16 @@ exports.login = async (req, res) => {
 
     const user = await User.findOne({ email });
     if (!user)
-      return res.status(400).json({ message: "Invalid credentials." });
+      return res.status(401).json({ message: "Invalid credentials." }); 
 
     if (!user.password)
-      return res.status(400).json({
+      return res.status(401).json({
         message: "This account was created via Google/Facebook or OTP login. Please use that method.",
-      });
+      }); 
 
     const match = await bcrypt.compare(password, user.password);
     if (!match)
-      return res.status(400).json({ message: "Invalid credentials." });
-
+      return res.status(401).json({ message: "Invalid credentials." }); 
     const token = generateToken(user);
     res.json({ message: "Login successful", token, user });
   } catch (err) {
@@ -341,22 +348,22 @@ exports.login = async (req, res) => {
 };
 
 
-
 exports.getProfile = async (req, res) => {
   try {
-  
     if (!req.user) {
       return res.status(401).json({ message: "Unauthorized access" });
     }
 
-    
     const user = await User.findById(req.user._id).select("-password");
     if (!user) return res.status(404).json({ message: "User not found" });
 
-    let profile = {};
+    let profile = {
+      _id: user._id  
+    };
 
     if (user.role === "technician") {
       profile = {
+        ...profile,
         name: `${user.firstName} ${user.lastName}`,
         role: user.role,
         email: user.email,
@@ -364,44 +371,40 @@ exports.getProfile = async (req, res) => {
         location: user.location,
         specialization: user.specialization,
         experience: user.experience,
-
       };
-    }
-
-    
-    else if (user.role === "client") {
+    } else if (user.role === "client") {
       profile = {
+        ...profile,
         name: `${user.firstName} ${user.lastName}`,
         role: user.role,
         email: user.email,
         phone: user.phone,
         location: user.location || "Not specified",
       };
-    }
-
-
-    
-      else if (user.role === "admin") {
+    } else if (user.role === "admin") {
       profile = {
+        ...profile,
         name: `${user.firstName} ${user.lastName}`,
         role: user.role,
         email: user.email,
         phone: user.phone,
         location: user.location || "Not specified",
-        designation:user.designation,
+        designation: user.designation,
       };
     }
-  
 
     res.status(200).json({
       success: true,
       profile,
     });
   } catch (err) {
-    console.error(" Profile Fetch Error:", err);
+    console.error("Profile Fetch Error:", err);
     res.status(500).json({ message: "Server error" });
   }
 };
+
+
+
 
 exports.getTechnicianSummary = async (req, res) => {
   try {

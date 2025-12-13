@@ -1,7 +1,12 @@
 .env
 assets/
 icon/
+test/
 TODO.TXT
 data.txt
 sjfd.txt
+afterupdate.txt
+loadtest/
+
+otherfile/
 *.txt

@@ -1,15 +1,15 @@
-// controllers/technicianController.js (or wherever)
 const fs = require("fs");
 const path = require("path");
 const QRCode = require("qrcode");
 const { uploadToCloudinary } = require("../utils/cloudinaryUpload"); 
 const {generatePaymentReceiptPDF}= require("../utils/finalinvoice");
 const { generateBillPDF } = require("../utils/Invoice"); 
-const sendEmail = require("../utils/sendemail"); 
+const sendEmail = require("../utils/sendemail");
+const { sendNotification } = require("../controllers/helpercontroller");
 const Work = require("../model/work");
 const User = require("../model/user");
 const Bill = require("../model/Bill");
-
+const Booking=require('../model/BookOrder')
 const projectRoot = process.cwd();
 const invoicesFolder = path.join(projectRoot, "invoices");
 
@@ -20,9 +20,10 @@ if (!fs.existsSync(invoicesFolder)) {
 
 exports.completeWorkAndGenerateBill = async (req, res) => {
   try {
-    const { workId, serviceCharge , paymentMethod = "upi", upiId } = req.body;
+    const { workId, serviceCharge , paymentMethod = "upi"||"cash", upiId,upiApp } = req.body;
     const technicianId = req.user._id;
-
+    const userId= await Work.findById(workId).select("client token serviceType");
+    console.log(userId);
   const paymentId = "pay_" + Date.now();
   const expiresAt = Date.now() + 10 * 60 * 1000; 
     
@@ -62,7 +63,7 @@ exports.completeWorkAndGenerateBill = async (req, res) => {
 let upiIntent = null;
        let qrBuffer = null;
     if (paymentMethod === "upi") {
-      const companyUpi = upiId || process.env.upi_id; // your company's UPI ID
+      const companyUpi = upiId || process.env.upi_id; 
       const companyName = encodeURIComponent(
         process.env.COMPANY_NAME || "FAST RESPONSE"
       );
@@ -70,7 +71,7 @@ let upiIntent = null;
         `Service Bill #${work.token || work._id}`
       );
 
-      // Auto-fill amount + company name
+      
       upiIntent =
         `upi://pay?pa=${companyUpi}` +
         `&pn=${companyName}` +
@@ -89,7 +90,7 @@ let upiIntent = null;
       technicianId,
       clientId: work.client._id,
       serviceCharge: totalAmount,
-      totalAmount,
+      totalAmount:work.serviceCharge,
       paymentMethod,
        upiIntent,
       status: "sent",
@@ -105,9 +106,9 @@ let upiIntent = null;
       if (!finalUpi) return res.status(400).json({ message: "UPI ID is required for UPI payment" });
 
       const name = encodeURIComponent(req.user.firstName || "Technician");
-      upiUri = `upi://pay?pa=${finalUpi}&pn=${name}&am=${serviceCharge}&cu=INR&tn=Service%20Payment`;
+   upiUri = `upi://pay?pa=${finalUpi}&pn=${name}&am=${totalAmount}&cu=INR&tn=Service%20Payment`;
+clickableUPI = `https://upi.me/pay?pa=${finalUpi}&pn=${name}&am=${totalAmount}&cu=INR&tn=Service%20Payment`;
 
-      clickableUPI = `https://upi.me/pay?pa=${finalUpi}&pn=${name}&am=${serviceCharge}&cu=INR&tn=Service%20Payment`;
 
       const qrDataUrl = await QRCode.toDataURL(upiUri);
       qrBuffer = Buffer.from(qrDataUrl.split(",")[1], "base64");
@@ -165,36 +166,57 @@ let upiIntent = null;
       });
     }
 
-    const emailBody = `
-      <p>Hello ${client.firstName || ""},</p>
-      <p>Your service <b>${work.serviceType || ""}</b> has been completed.</p>
-      <p><b>Total Amount:</b> ₹${totalAmount}</p>
-      ${
-        paymentMethod === "upi"
-          ? `<p><b>Pay Now:</b> <a href="${clickableUPI}">Click here to pay via UPI</a></p>
-             <p><img src="cid:qr_code" width="180" /></p>`
-          : `<p><b>Payment Mode:</b> Cash</p>`
-      }
-      <p>The bill (PDF) is attached.</p>
-      <p>Thank you!</p>
-    `;
-
-    await sendEmail(client.email, "Your Bill & Payment Details", emailBody, attachments);
-
    
-    work.status = "completed";
+
+
+
+  
+    work.status = "work_completed";
     work.completedAt = new Date();
     work.billId = bill._id;
     await work.save();
+   await Booking.findOneAndUpdate(
+      {
+        technician: technicianId,
+        user: work.client._id,
+        status: { $in: ["Requested", "approved", "on_the_way", "inprogress"] } // only active bookings
+      },
+      {
+        status: "work_completed",
+        completedAt: new Date() // optional
+      },
+      { new: true }
+    );
+  
 
-    return res.status(200).json({
-      message: "Work completed successfully",
-      afterphoto: finalPhotoUrl,
-      bill,
-      upiUri,
-      clickableUPI,
-      expiresAt,
-    });
+   await sendNotification(
+  userId.client,
+  "client",
+  "Work Complete",
+  `Your technician ${technician.firstName} complete your work.the service type is ${userId.serviceType}.Please pay your bill`,
+  "work_completed",
+  `work-${userId.token}`
+)
+ return res.status(200).json({
+  success: true,
+  bill: {
+    workId: work._id,
+    serviceType: work.serviceType,
+    baseCharge: work.serviceCharge,
+    extraCharges: work.extraCharges || 0,
+    tax: work.tax || 0,
+    totalAmount: totalAmount,
+  },
+  payment: {
+    upiUri,
+    clickableUPI,
+    upiApp,  
+    qrImage: billData.qrImage,
+    expiresAt
+  },
+  afterPhoto: finalPhotoUrl
+});
+  
 
   } catch (err) {
     console.error("COMPLETE WORK ERROR:", err);
@@ -217,13 +239,13 @@ exports.getTechnicianSummary1 = async (req, res) => {
 
     const activeCount = await Work.countDocuments({
       assignedTechnician: technicianId,
-      status: { $in: ["dispatch", "inprogress"] },
+      status: { $in: ["om_the_way", "inprogress"] },
     });
 
   
     const completedCount = await Work.countDocuments({
       assignedTechnician: technicianId,
-      status: "completed",
+      status: "work_completed",
     });
 
  
@@ -235,7 +257,7 @@ exports.getTechnicianSummary1 = async (req, res) => {
    
     const completedWorks = await Work.find({
       assignedTechnician: technicianId,
-      status: "completed",
+      status: "work_completed",
     });
 
     const totalEarnings = completedWorks.reduce((sum, work) => {
@@ -318,7 +340,9 @@ exports.approveJob = async (req, res) => {
   try {
     const technicianId = req.user._id;
     const { workId } = req.body;
-
+    
+    const userId= await Work.findById(workId).select("client serviceCharge token");
+    console.log(userId)
     const work = await Work.findById(workId);
     if (!work) return res.status(404).json({ message: "Work not found" });
 
@@ -330,8 +354,16 @@ exports.approveJob = async (req, res) => {
       return res.status(403).json({ message: "You are not authorized to approve this job" });
     }
 
-    work.status = "approved";
-    await work.save();
+   
+
+   await sendNotification(
+  userId,
+  "client",
+  "Booking Confirmed",
+  `Your technician ${technicianId.firstName} has been booked successfully.the service type is ${userId.serviceType}`,
+  "booking_confirmed",
+  `work-${userId.token}`
+);
 
     res.status(200).json({
       success: true,
@@ -355,9 +387,9 @@ exports.getTechnicianSummarybycount = async (req, res) => {
       .populate("billId")
       .sort({ createdAt: -1 });
 
-    const completed = works.filter(w => w.status === "completed");
-    const inProgress = works.filter(w => ["inprogress", "confirm"].includes(w.status));
-    const upcoming = works.filter(w => ["approved", "dispatch", "taken", "open"].includes(w.status));
+    const completed = works.filter(w => w.status === "work_completed");
+    const inProgress = works.filter(w => ["inprogress", "payment_done"].includes(w.status));
+    const upcoming = works.filter(w => ["approved", "on_the_way", "open"].includes(w.status));
     const onHold = works.filter(w => ["onhold_parts", "rescheduled", "escalated"].includes(w.status));
 
     const totalEarnings = works.reduce((sum, w) => sum + (w.billId?.totalAmount || 0), 0);
@@ -410,9 +442,9 @@ exports.getAllTechnicianWorks = async (req, res) => {
 
    
     const categorized = {
-      completed: works.filter(w => w.status === "completed"),
-      inProgress: works.filter(w => ["inprogress", "confirm"].includes(w.status)),
-      upcoming: works.filter(w => ["approved", "dispatch", "taken", "open"].includes(w.status)),
+      completed: works.filter(w => w.status === "work_completed"),
+      inProgress: works.filter(w => ["inprogress", "payment_done"].includes(w.status)),
+      upcoming: works.filter(w => ["approved", "on_the_way",  "open"].includes(w.status)),
       onHold: works.filter(w => ["onhold_parts", "rescheduled", "escalated"].includes(w.status)),
     };
 
@@ -436,7 +468,7 @@ exports.confirmPayment = async (req, res) => {
   try {
     const { workId, paymentMethod } = req.body; 
     const technicianId = req.user._id;
-
+    const userId=await Work.findById(workId).select("client token serviceType");
     const work = await Work.findById(workId)
       .populate("client", "firstName email phone")
       .populate("assignedTechnician", "firstName token email role phone");
@@ -461,14 +493,14 @@ exports.confirmPayment = async (req, res) => {
    
     work.payment = {
       method: paymentMethod,
-      status: "confirmed",
+      status: "payment_done",
       confirmedBy: technicianId,
       confirmedAt: new Date(),
       paidAt: work.payment?.paidAt || new Date(), 
     };
 
    
-    work.status = "confirm";
+    work.status = "payment_done";
     await work.save();
  const receiptFilePath = path.join(
       invoicesFolder,
@@ -485,29 +517,36 @@ exports.confirmPayment = async (req, res) => {
     );
 
     const pdfBuffer = fs.readFileSync(receiptFilePath);
-    const emailBody = `
-      <p>Hello ${work.client.firstName || ""},</p>
-      <p>Your payment for Work ID <b>${work.token}</b> has been successfully confirmed.</p>
-      <p><b>Payment Method:</b> ${paymentMethod.toUpperCase()}</p>
-      <p><b>Technician:</b> ${work.assignedTechnician.firstName}</p>
-      <p>Your payment receipt is attached as a PDF.</p>
-    `;
+    // const emailBody = `
+    //   <p>Hello ${work.client.firstName || ""},</p>
+    //   <p>Your payment for Work ID <b>${work.token}</b> has been successfully confirmed.</p>
+    //   <p><b>Payment Method:</b> ${paymentMethod.toUpperCase()}</p>
+    //   <p><b>Technician:</b> ${work.assignedTechnician.firstName}</p>
+    //   <p>Your payment receipt is attached as a PDF.</p>
+    // `;
 
-    await sendEmail(
-      work.client.email,
-      "Payment Receipt - Thank You",
-      emailBody,
-      [
-        {
-          content: pdfBuffer.toString("base64"),
-          filename: `payment_receipt_${work.token}.pdf`,
-          type: "application/pdf",
-          disposition: "attachment",
-        },
-      ]
-    );
+    // await sendEmail(
+    //   work.client.email,
+    //   "Payment Receipt - Thank You",
+    //   emailBody,
+    //   [
+    //     {
+    //       content: pdfBuffer.toString("base64"),
+    //       filename: `payment_receipt_${work.token}.pdf`,
+    //       type: "application/pdf",
+    //       disposition: "attachment",
+    //     },
+    //   ]
+    // );
 
-
+   await sendNotification(
+  userId.client,
+  "client",
+  "Payment Successful",
+  `Your technician ${technicianId.firstName} complete your work.the service type is ${userId.serviceType}.Payment type:${paymentMethod}`,
+  "payment_received",
+  `work-${userId.token}`
+)
     res.status(200).json({
       success: true,
       message: "Payment confirmed successfully by technician.",
@@ -543,6 +582,7 @@ exports.raiseWorkIssue = async (req, res) => {
     switch (issueType) {
       case "need_parts":
         work.status = "inprogress";
+
         break;
 
       case "need_specialist":
@@ -576,4 +616,70 @@ exports.raiseWorkIssue = async (req, res) => {
     res.status(500).json({ message: "Failed to raise issue" });
   }
 };
+
+
+
+exports.needPartRequest = async (req, res) => {
+  try {
+    const { workId, parts } = req.body;
+    const technicianId = req.user?._id || req.body.technicianId;
+
+    if (!parts || !Array.isArray(parts) || !parts.length) {
+      return res.status(400).json({ message: "Parts details are required" });
+    }
+
+    const work = await Work.findById(workId);
+    if (!work) return res.status(404).json({ message: "Work not found" });
+
+
+    let latestIssue = work.issues.find(i => i.issueType === "need_parts" && i.status === "open");
+    if (!latestIssue) {
+      latestIssue = work.issues.create({
+        issueType: "need_parts",
+        remarks: "",
+        raisedBy: technicianId,
+        raisedAt: new Date(),
+        status: "open",
+        parts: []
+      });
+      work.issues.push(latestIssue);
+    }
+
+    // Add new parts
+   parts.forEach(p => {
+  latestIssue.parts.push({
+    itemName: p.itemName,
+    quantity: p.quantity,
+    Decofitem: typeof p.Decofitem === "string" && p.Decofitem.trim() !== "" 
+                ? p.Decofitem 
+                : "not having", // ✅ default fallback
+    unit: p.unit || "",
+    company: p.companyName || "",
+    requiredDate: p.requiredDate ? new Date(p.requiredDate) : null,
+    deliveryAddress: work.location || "",
+    requestedBy: technicianId,
+    requestedOn: new Date(),
+    status: "pending_fastresponse" 
+  });
+});
+
+    work.status = "inprogress";
+    await work.save();
+
+    return res.status(201).json({
+      success: true,
+      message: "Parts requested successfully",
+      parts: latestIssue.parts,
+      work
+    });
+  } catch (err) {
+    console.error("Add Part Request Error:", err);
+    return res.status(500).json({
+      message: "Failed to add part request",
+      error: err.message,
+      stack: err.stack
+    });
+  }
+};
+
 

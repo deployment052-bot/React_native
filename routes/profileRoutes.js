@@ -1,11 +1,11 @@
 const express = require("express");
-const { updateProfile } = require("../controllers/profile");
-const { protect, authorize } = require("../middleware/authMiddleware");
+
+const { protect, authorize } = require("../middelware/authMiddelware");
 const User=require('../model/user')
 const router = express.Router();
+const profile=require('../controllers/profile')
 
-
-router.put("/update", protect, updateProfile);
+router.put("/update", protect, profile.updateProfile);
 
 
 router.get("/all", protect, authorize("admin"), async (req, res) => {
@@ -13,4 +13,8 @@ router.get("/all", protect, authorize("admin"), async (req, res) => {
   res.json(users);
 });
 
+router.patch('/update-technician/:id',protect,authorize('admin'),profile.updateProfileTechnician)
+router.patch('/update-client/:id',protect,authorize('client'),profile.updateProfileClient)
+router.delete('/delete-technician/:id',protect,authorize('admin'),profile.deleteTechnician);
+router.delete('/delete-client/:id',protect,profile.deleteClient)
 module.exports = router;
