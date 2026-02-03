@@ -10,3 +10,6 @@ loadtest/
 firbase/
 otherfile/
 *.txt
+node_modules/
+uploads/
+
