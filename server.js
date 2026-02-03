@@ -94,7 +94,7 @@ app.use(express.urlencoded({ extended: true }));
   app.use('/ims', require('./routes/ssologin'));
   app.use('/profile', require('./routes/profileRoutes'));
   app.use('/notification', require('./routes/notificationroute'));
-  app.use('/check', require('./routes/checkroute'));
+  // app.use('/check', require('./routes/checkroute'));
   app.use('/serviceCard', require('./routes/serviceroute'));
 
   // Conditional loading for Linux/Windows
