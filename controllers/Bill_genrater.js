@@ -39,7 +39,7 @@ exports.payBill = async (req, res) => {
     if (String(work.client._id) !== String(clientId))
       return res.status(403).json({ message: "Unauthorized" });
 
-    if (work.status !== "work_completed")
+    if (work.status !== "completed")
       return res.status(400).json({ message: "Work not completed yet" });
 
     

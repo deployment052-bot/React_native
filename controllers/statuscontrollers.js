@@ -13,7 +13,7 @@ exports.getAllWorks = async (req, res) => {
    
     const works = await Work.find({ client: clientId })
       .populate("client", "name email phone")
-      .populate("assignedTechnician", "firstName lastName email phone specialization ratings")
+      .populate("assignedTechnician", "firstName lastName email phone specialization ratings _id")
       .sort({ createdAt: -1 });
 
     if (!works.length) {
@@ -36,8 +36,10 @@ exports.getAllWorks = async (req, res) => {
         phone: work.client?.phone,
       },
       assignedTechnician: work.assignedTechnician
+    
         ? {
-            name: work.assignedTechnician.name,
+          technicianId: work.assignedTechnician._id,
+            name: work.assignedTechnician.firstName,
             email: work.assignedTechnician.email,
             phone: work.assignedTechnician.phone,
             specialization: work.assignedTechnician.specialization,
@@ -51,6 +53,7 @@ exports.getAllWorks = async (req, res) => {
       totalWorks: works.length,
       works: formattedWorks,
     });
+    // console.log(res)
   } catch (err) {
     console.error("Get All Works Error:", err);
     res.status(500).json({ message: "Server error" });
@@ -126,6 +129,7 @@ exports.getClientWorkStatus = async (req, res) => {
       message: "Work status fetched successfully",
       workStatus,
     });
+
   } catch (err) {
     console.error("Client Work Status Error:", err);
     res.status(500).json({ message: "Server error" });

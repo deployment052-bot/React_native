@@ -1,5 +1,5 @@
 const mongoose = require('mongoose');
-const Service = require('../model/service');
+const Service = require('../model/servicecard');
 const Work = require('../model/work');
 const User= require('../model/user')
 

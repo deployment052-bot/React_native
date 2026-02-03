@@ -12,7 +12,7 @@ const bookingSchema = new mongoose.Schema({
   date: { type: Date, required: true },
   status: {
     type: String,
-     enum: ["open", "taken", "approved", "inprogress", "work_completed","payment_done","on_the_way","Requested"],
+     enum: ["open", "taken", "approved", "inprogress", "work_completed","payment_done","on_the_way","Requested","dispatch"],
     default: "open"
   },
 }, { timestamps: true });

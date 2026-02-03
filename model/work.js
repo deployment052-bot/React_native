@@ -24,29 +24,51 @@ const workSchema = new mongoose.Schema(
       lat: Number,
       lng: Number,
     },
+  date:{type:String},
+  
+ 
 
     token: String,
 
-    status: {
+    // status: {
+    //   type: String,
+    //   enum: [
+    //     "open",
+        
+    //     "approved",
+    //     "reject",
+    //     "on_the_way" ,
+    //     "inprogress",
+    //     "work_completed",//"WORK COMP",
+    //     "painding payment",
+    //     "payment_done",//"PAID","P-R",
+    //     "onhold_parts",
+    //     "escalated",
+    //     "rescheduled",
+    //   ],
+    //   default: "open",
+    // },
+
+   status: {
       type: String,
       enum: [
         "open",
-        
+        "taken",
         "approved",
+
         "reject",
-        "on_the_way" ,//"ON THE WAY",
+        "cancelled",
+        "reschedule",
+        "dispatch",
         "inprogress",
-        "work_completed",//"WORK COMP",
-        "painding payment",
-        "payment_done",//"PAID","P-R",
+        "completed",
+        "confirm",
         "onhold_parts",
         "escalated",
         "rescheduled",
       ],
       default: "open",
     },
-
-
 
 
 
@@ -63,7 +85,7 @@ const workSchema = new mongoose.Schema(
 
     status: {
       type: String,
-      enum: ["open", "resolved"],
+      enum: ["open", "resolved","unresolved"],
       default: "open",
     },
 

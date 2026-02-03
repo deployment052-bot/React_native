@@ -35,3 +35,54 @@ exports.authorize = (...roles) => {
     next();
   };
 };
+
+exports.authorizeHOD = (...HodType) => {
+ return (req, res, next) => {
+    const user = req.user;
+
+
+    if (user.role === "admin") {
+      return next();
+    }
+
+    
+    if (user.role !== "Hod") {
+      return res.status(403).json({
+        message: "Access denied: Not HOD or Admin"
+      });
+    }
+
+    if (!HodType.includes(user.HodType)) {
+      return res.status(403).json({
+        message: `Access denied for HodType: ${user.HodType}`
+      });
+    }
+
+    next();
+  };
+};
+
+exports.authorizeTl = (...TLType) => {
+  return (req, res, next) => {
+    const user = req.user;
+
+    if (user.role === "admin") {
+      return next();
+    }
+
+    if (user.role !== "TL") {
+      return res.status(403).json({
+        message: "Access denied: Not TL or Admin"
+      });
+    }
+
+    if (!TLType.includes(user.TLType)) {
+      return res.status(403).json({
+        message: `Access denied for TLType: ${user.TLType}`
+      });
+    }
+
+    next();
+  };
+};
+

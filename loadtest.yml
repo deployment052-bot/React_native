@@ -1,0 +1,12 @@
+config:
+  target: "http://localhost:5000"
+  phases:
+    - duration: 30
+      arrivalRate: 100   # 200 concurrent users
+scenarios:
+  - flow:
+      - post:
+          url: "/auth/login"
+          json:
+            email: "aluminiumwork1765539535884352@gmail.com"
+            password: "123"

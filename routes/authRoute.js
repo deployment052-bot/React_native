@@ -3,7 +3,7 @@ const passport = require("passport");
 const { protect , authorize} = require("../middelware/authMiddelware");
 const jwt = require("jsonwebtoken");
 const User = require("../model/user");
-const FRONTEND_URL = process.env.FRONTEND_URL || "https://whimsical-fenglisu-4a7b67.netlify.app";
+const FRONTEND_URL = process.env.FRONTEND_URL || "https://honeydew-ibex-486236.hostingersite.com";
 const {
   registerClient,
   registerTechnician,

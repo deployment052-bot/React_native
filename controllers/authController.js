@@ -107,6 +107,129 @@ exports.registeradmin= async (req, res) => {
   }
 };
 
+exports.registerHods= async (req, res) => {
+  try {
+    const { firstName, lastName, email, phone, password, confirmPassword,Hod,specialization } = req.body;
+
+    if (!firstName || !lastName || !email || !phone || !password || !confirmPassword || !Hod)
+      return res.status(400).json({ message: "All fields are required." });
+
+    if (password !== confirmPassword)
+      return res.status(400).json({ message: "Passwords do not match." });
+
+    let user = await User.findOne({ email });
+
+ 
+    if (user && user.isEmailVerified) {
+      return res.status(400).json({ message: "Email already registered and verified." });
+    }
+
+    const hashedPassword = await bcrypt.hash(password, 10);
+
+    if (!user) {
+      user = new User({
+        firstName,
+        lastName,
+        email,
+        phone,
+        role: "admin",
+        password: hashedPassword,
+        Hod,
+        specialization
+      });
+    } else {
+    
+      user.set({
+        firstName,
+        lastName,
+        phone,
+        password: hashedPassword,
+        role: "admin",
+        Hod
+      });
+    }
+
+   
+   
+    user.experience = undefined;
+    user.availability = undefined;
+    user.onDuty = undefined;
+    user.technicianStatus = undefined;
+
+    await sendVerificationOTP(user, email, firstName);
+
+    res.status(200).json({
+      message: "OTP sent to your email. Verify to complete registration.",
+      email,
+    });
+  } catch (err) {
+    console.error(" admin registration error:", err.message);
+    res.status(500).json({ message: "Registration failed. Try again later." });
+  }
+};
+
+exports.registerHods= async (req, res) => {
+  try {
+    const { firstName, lastName, email, phone, password, confirmPassword,TL,specialization,experience } = req.body;
+
+    if (!firstName || !lastName || !email || !phone || !password || !confirmPassword || !TL)
+      return res.status(400).json({ message: "All fields are required." });
+
+    if (password !== confirmPassword)
+      return res.status(400).json({ message: "Passwords do not match." });
+
+    let user = await User.findOne({ email });
+
+ 
+    if (user && user.isEmailVerified) {
+      return res.status(400).json({ message: "Email already registered and verified." });
+    }
+
+    const hashedPassword = await bcrypt.hash(password, 10);
+
+    if (!user) {
+      user = new User({
+        firstName,
+        lastName,
+        email,
+        phone,
+        role: "admin",
+        password: hashedPassword,
+        TL,
+        specialization,
+        experience
+      });
+    } else {
+    
+      user.set({
+        firstName,
+        lastName,
+        phone,
+        password: hashedPassword,
+        role: "admin",
+        TL,
+        experience
+      });
+    }
+
+   
+   
+  
+    user.availability = undefined;
+    user.onDuty = undefined;
+    user.technicianStatus = undefined;
+
+    await sendVerificationOTP(user, email, firstName);
+
+    res.status(200).json({
+      message: "OTP sent to your email. Verify to complete registration.",
+      email,
+    });
+  } catch (err) {
+    console.error(" admin registration error:", err.message);
+    res.status(500).json({ message: "Registration failed. Try again later." });
+  }
+};
 exports.registerClient = async (req, res) => {
   try {
     const { firstName, lastName, email, phone, password, confirmPassword } = req.body;
@@ -185,6 +308,8 @@ async function getCoordinates(location) {
     return null;
   }
 }
+
+
 
 exports.registerTechnician = async (req, res) => {
   try {
@@ -323,29 +448,50 @@ exports.resendOTP = async (req, res) => {
 
 exports.login = async (req, res) => {
   try {
-    const { email, password } = req.body;
-    if (!email || !password)
-      return res.status(400).json({ message: "Email and password required." });
+    const { email, phone, password } = req.body;
 
-    const user = await User.findOne({ email });
+    if (!password)
+      return res.status(400).json({ message: "Password is required" });
+
+    if (!email && !phone)
+      return res.status(400).json({
+        message: "Email or phone is required"
+      });
+
+    if (email && phone)
+      return res.status(400).json({
+        message: "Use either email or phone, not both"
+      });
+
+    const query = email ? { email } : { phone };
+    const user = await User.findOne(query);
+
     if (!user)
-      return res.status(401).json({ message: "Invalid credentials." }); 
+      return res.status(401).json({ message: "Invalid credentials" });
 
     if (!user.password)
       return res.status(401).json({
-        message: "This account was created via Google/Facebook or OTP login. Please use that method.",
-      }); 
+        message: "This account uses OTP or social login"
+      });
 
     const match = await bcrypt.compare(password, user.password);
     if (!match)
-      return res.status(401).json({ message: "Invalid credentials." }); 
+      return res.status(401).json({ message: "Invalid credentials" });
+
     const token = generateToken(user);
-    res.json({ message: "Login successful", token, user });
+    console.log(token)
+    res.json({
+      message: "Login successful",
+      token,
+      user
+    });
+
   } catch (err) {
     console.error("Login Error:", err);
-    res.status(500).json({ message: "Server error during login." });
+    res.status(500).json({ message: "Server error" });
   }
 };
+
 
 
 exports.getProfile = async (req, res) => {

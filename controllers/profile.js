@@ -147,3 +147,48 @@ exports.deleteTechnician = async (req, res) => {
   }
 };
 
+exports.setProfile = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const user = await User.findById(userId);
+
+    if (!user.isPhoneVerified)
+      return res.status(403).json({ message: "Phone not verified" });
+
+    if (user.isProfileCompleted)
+      return res.status(400).json({ message: "Profile already set" });
+
+    const allowedFields = [
+      "firstName",
+      "lastName",
+      "email",
+      "password",
+      "location",
+      "address"
+    ];
+
+    const updates = {};
+    allowedFields.forEach(f => {
+      if (req.body[f] !== undefined) {
+        updates[f] = req.body[f];
+      }
+    });
+
+    if (updates.password) {
+      updates.password = await bcrypt.hash(updates.password, 10);
+    }
+
+    Object.assign(user, updates);
+    user.isProfileCompleted = true;
+
+    await user.save();
+
+    res.json({
+      message: "Profile set successfully",
+      user
+    });
+
+  } catch (err) {
+    res.status(500).json({ message: "Server error" });
+  }
+};

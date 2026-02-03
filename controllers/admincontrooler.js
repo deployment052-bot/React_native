@@ -3,7 +3,9 @@ const Work = require("../model/work");
 const jwt = require("jsonwebtoken");
 const User = require("../model/user");
 const axios = require("axios");
-
+const admin = require("firebase-admin");
+const { cache } = require("../utils/redis");
+// const { cache, client: redisClient } = require("../utils/redis");
 exports.resolveWorkIssue = async (req, res) => {
   try {
     const { workId, issueId } = req.body;
@@ -38,7 +40,20 @@ exports.resolveWorkIssue = async (req, res) => {
     }
 
     await work.save();
-
+    const technicianUser = await User.findById(technicianId).select("fcmToken");
+if (technicianUser?.fcmToken) {
+  await admin.messaging().send({
+    token: technicianUser.fcmToken,
+    notification: {
+      title: "Issue Resolved",
+      body: `Your issue is resolved for ${work._id.token}`,
+    },
+    data: {
+      type: "issue_resolved",
+      link: `work-${lockedWork.token}`,
+    },
+  });
+}
     res.status(200).json({
       message: "Issue resolved successfully",
       work,
@@ -50,83 +65,98 @@ exports.resolveWorkIssue = async (req, res) => {
   }
 };
 
-exports.getTechnicianWorkForAdmin = async (req, res) => {
+exports.unresolveWorkIssue = async (req, res) => {
   try {
-    const { technicianId } = req.body;
+    const { workId, issueId } = req.body;
+    const adminId = req.user?._id || req.body.adminId;
 
-    if (!technicianId) {
-      return res.status(400).json({ message: "Technician ID is required" });
+    const work = await Work.findById(workId);
+    if (!work) return res.status(404).json({ message: "Work not found" });
+
+    const issue = work.issues.id(issueId);
+    if (!issue) return res.status(404).json({ message: "Issue not found" });
+
+    if (issue.status !== "resolved") {
+      return res.status(400).json({
+        message: "Only resolved issues can be marked as unresolved",
+      });
     }
 
+    issue.status = "unresolved";
+    issue.unresolvedBy = adminId;
+    issue.unresolvedAt = new Date();
+
+ 
+    work.issueCount = (work.issueCount || 0) + 1;
+
    
-    const technician = await User.findById(technicianId).select(
-      "firstName lastName email phone"
+    const activeIssues = work.issues.filter(
+      (i) => i.status === "open" || i.status === "unresolved"
     );
 
-    if (!technician) {
-      return res.status(404).json({ message: "Technician not found" });
+    if (activeIssues.length > 0) {
+      work.status = "issue_pending";
     }
 
- 
-    const works = await Work.find({ assignedTechnician: technicianId })
-      .populate("client", "firstName lastName phone location ")
-      .populate("invoice")
-      .sort({ createdAt: -1 });
+    await work.save();
 
- 
-    const totalWorkCount = works.length;
-
-    const activeCount = works.filter(w =>
-      ["on_the_way", "inprogress","approved"].includes(w.status)
-    ).length;
-
-    const completedCount = works.filter(w => w.status === "work_completed").length;
-
-    const rejectedCount = works.filter(w => w.status === "rejected").length;
-
-   
-    const totalEarnings = works.reduce((sum, work) => {
-      const invoiceTotal = work.invoice?.total || 0;
-      const serviceCharge = work.serviceCharge || 0;
-      return sum + invoiceTotal + serviceCharge;
-    }, 0);
-
-   
     res.status(200).json({
       success: true,
-      technician,
-      summary: {
-        totalWorkCount,
-        activeCount,
-        completedCount,
-        rejectedCount,
-        totalEarnings,
-      },
-      works,  // All work details list
+      message: "Issue marked as unresolved",
+      work,
     });
 
   } catch (error) {
-    console.error("Admin Technician Work Summary Error:", error);
-    res.status(500).json({
-      message: "Failed to fetch technician work summary",
-      error: error.message,
-    });
+    console.error("Unresolve Issue Error:", error);
+    res.status(500).json({ message: "Failed to unresolve issue" });
+  }
+};
+
+
+
+exports.getTechnicianWorkForAdmin = async (req, res) => {
+  const { technicianId } = req.body;
+  if (!technicianId) return res.status(400).json({ message: "Technician ID is required" });
+
+  const key = `techwork:${technicianId}`;
+
+  try {
+    const data = await cache(key, async () => {
+      const technician = await User.findById(technicianId).select("firstName lastName email phone");
+      const works = await Work.find({ assignedTechnician: technicianId })
+        .populate("client", "firstName lastName phone location")
+        .populate("invoice")
+        .sort({ createdAt: -1 });
+
+      const totalWorkCount = works.length;
+      const activeCount = works.filter(w => ["on_the_way", "inprogress", "approved","dispatch"].includes(w.status)).length;
+      const completedCount = works.filter(w => w.status === "completed").length;
+      const rejectedCount = works.filter(w => w.status === "rejected").length;
+      const totalEarnings = works.reduce((sum, work) => (sum + (work.invoice?.total || 0) + (work.serviceCharge || 0)), 0);
+
+      return { technician, summary: { totalWorkCount, activeCount, completedCount, rejectedCount, totalEarnings }, works };
+    }, 60); // cache 60 seconds
+
+    res.status(200).json(data);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: "Failed to fetch data", error: error.message });
   }
 };
 
 
 exports.getAllTechniciansForAdmin = async (req, res) => {
   try {
-    
-    const technicians = await User.find({ role: "technician" })
-      .select("firstName lastName email phone createdAt location specialization responsibility");
+    const technicians = await cache("all_technicians", async () => {
+      return await User.find({ role: "technician" })
+        .select("firstName lastName email phone createdAt location specialization responsibility");
+    }, 120); 
 
     res.status(200).json({
       success: true,
       count: technicians.length,
       technicians,
     });
-
   } catch (err) {
     console.error("Get All Technicians Error:", err);
     res.status(500).json({
@@ -183,10 +213,10 @@ exports.getclientWorkForAdmin = async (req, res) => {
     const totalWorkCount = works.length;
 
     const activeCount = works.filter(w =>
-      ["on_the_way", "inprogress","approved"].includes(w.status)
+      ["on_the_way", "inprogress","approved","dispatch"].includes(w.status)
     ).length;
 
-    const completedCount = works.filter(w => w.status === "work_completed").length;
+    const completedCount = works.filter(w => w.status === "completed").length;
 
     const rejectedCount = works.filter(w => w.status === "rejected").length;
 res.status(200).json({
@@ -212,26 +242,34 @@ res.status(200).json({
 };
 
 
-exports.getAllWorkAdmin=async (req,res)=>{
-try{
-    const work =await Work.find ({})
-  .populate("client","firstName lastName email phone location createdAt")
-  .populate("assignedTechnician","firstName lastName email phone location")
-  .sort({createAt:-1})
-  res.status(200).json
-({
-  success:true,
-  count:work.length,
-  work,
-})
-}catch(err){
-console.error("Get all work error",err)
-res.status(500).json
-({
-  success:false,
-  message:"unable to fetch work "
-})}
+exports.getAllWorkAdmin = async (req, res) => {
+  try {
+    const cacheKey = "admin:works:all";
 
+    const work = await cache(
+      cacheKey,
+      async () => {
+        return await Work.find({})
+          .populate("client", "firstName lastName email phone location createdAt")
+          .populate("assignedTechnician", "firstName lastName email phone location")
+          .sort({ createdAt: -1 }); 
+      },
+      60 
+    );
+
+    res.status(200).json({
+      success: true,
+      count: work.length,
+      work,
+    });
+
+  } catch (err) {
+    console.error("Get all work error", err);
+    res.status(500).json({
+      success: false,
+      message: "unable to fetch work",
+    });
+  }
 };
 
 exports.getOpenIssues = async (req, res) => {
@@ -637,6 +675,301 @@ exports.getNeedPartsByWorkId = async (req, res) => {
   } catch (err) {
     console.error("Error fetching need parts by work ID:", err);
     res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+
+exports.getIssueChartCounts = async (req, res) => {
+  try {
+    const result = await Work.aggregate([
+      { $unwind: "$issues" },
+      {
+        $group: {
+          _id: "$issues.status",
+          count: { $sum: 1 }
+        }
+      }
+    ]);
+
+    let totalIssues = 0;
+
+    const chartCounts = {
+      on_hold: 0,      
+      resolved: 0,
+      unresolved: 0,
+      other: 0
+    };
+
+    result.forEach(item => {
+      totalIssues += item.count;
+
+      if (item._id === "open") {
+        chartCounts.on_hold = item.count; 
+      } 
+      else if (item._id === "resolved") {
+        chartCounts.resolved = item.count;
+      } 
+      else if (item._id === "unresolved") {
+        chartCounts.unresolved = item.count;
+      } 
+      else {
+        chartCounts.other += item.count;
+      }
+    });
+
+    res.status(200).json({
+      success: true,
+      totalIssues,
+      data: chartCounts
+    });
+
+  } catch (err) {
+    console.error("Issue Chart Count Error:", err);
+    res.status(500).json({
+      message: "Failed to fetch issue chart counts"
+    });
+  }
+};
+
+
+
+exports.getOrdersClientsGraph = async (req, res) => {
+  try {
+    const type = req.query.type || "day";
+    const baseDate = req.query.date ? new Date(req.query.date) : new Date();
+
+    let startDate, endDate, groupId, labelFn;
+    let graphData = [];
+
+    // ================= DAY =================
+    if (type === "day") {
+      startDate = new Date(baseDate);
+      startDate.setHours(0, 0, 0, 0);
+
+      endDate = new Date(baseDate);
+      endDate.setHours(23, 59, 59, 999);
+
+      groupId = { hour: { $hour: "$createdAt" } };
+      labelFn = (d) => `${d.hour}:00`;
+
+      // generate 24 hours
+      for (let h = 0; h < 24; h++) {
+        graphData.push({ label: `${h}:00`, orders: 0, clients: 0 });
+      }
+    }
+
+    // ================= WEEK =================
+    else if (type === "week") {
+      const d = new Date(baseDate);
+      const day = d.getDay(); // 0 = Sunday
+
+      // Monday of current week
+      const monday = new Date(d);
+      monday.setDate(d.getDate() - day + (day === 0 ? -6 : 1));
+      monday.setHours(0, 0, 0, 0);
+      startDate = monday;
+
+      // End date: clicked day if not Sunday, else Sunday
+      const endOfWeek = new Date(d);
+      endOfWeek.setHours(23, 59, 59, 999);
+      endDate = day === 0 ? new Date(monday.getTime() + 6 * 24 * 60 * 60 * 1000) : endOfWeek;
+
+      groupId = { day: { $dayOfMonth: "$createdAt" } };
+      labelFn = (d) => `Day ${d.day}`;
+
+      // generate week days (Mon -> clickedDay/Sunday)
+      const temp = new Date(startDate);
+      while (temp <= endDate) {
+        graphData.push({
+          day: temp.getDate(),
+          label: `Day ${temp.getDate()}`,
+          orders: 0,
+          clients: 0
+        });
+        temp.setDate(temp.getDate() + 1);
+      }
+    }
+
+    // ================= MONTH =================
+    else if (type === "month") {
+      startDate = new Date(baseDate.getFullYear(), baseDate.getMonth(), 1);
+      startDate.setHours(0, 0, 0, 0);
+
+      endDate = new Date(baseDate.getFullYear(), baseDate.getMonth() + 1, 0);
+      endDate.setHours(23, 59, 59, 999);
+
+      groupId = { day: { $dayOfMonth: "$createdAt" } };
+      labelFn = (d) => `Day ${d.day}`;
+
+      // generate all days in month
+      const temp = new Date(startDate);
+      while (temp <= endDate) {
+        graphData.push({
+          day: temp.getDate(),
+          label: `Day ${temp.getDate()}`,
+          orders: 0,
+          clients: 0
+        });
+        temp.setDate(temp.getDate() + 1);
+      }
+    }
+
+    // ================= ORDERS =================
+    const ordersAgg = await Work.aggregate([
+      {
+        $match: {
+          createdAt: { $gte: startDate, $lte: endDate }
+        }
+      },
+      {
+        $group: {
+          _id: groupId,
+          orders: { $sum: 1 }
+        }
+      }
+    ]);
+
+    // ================= CLIENTS =================
+    const clientsAgg = await User.aggregate([
+      {
+        $match: {
+          role: "client",
+          createdAt: { $gte: startDate, $lte: endDate }
+        }
+      },
+      {
+        $group: {
+          _id: groupId,
+          clients: { $sum: 1 }
+        }
+      }
+    ]);
+
+    // ================= MERGE DATA =================
+    graphData = graphData.map((item) => {
+      // Merge orders
+      const order = ordersAgg.find(o => {
+        if (type === "day") return o._id.hour === parseInt(item.label);
+        return o._id.day === item.day;
+      });
+      if (order) item.orders = order.orders;
+
+      // Merge clients
+      const client = clientsAgg.find(c => {
+        if (type === "day") return c._id.hour === parseInt(item.label);
+        return c._id.day === item.day;
+      });
+      if (client) item.clients = client.clients;
+
+      return item;
+    });
+
+    res.status(200).json({
+      success: true,
+      type,
+      date: baseDate,
+      graphData
+    });
+
+  } catch (error) {
+    console.error("Graph Error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to load graph data"
+    });
+  }
+};
+
+
+exports.getlinegraph=async(req,res)=>{
+  try{
+    const work =await Work.find();
+    console.log(work)
+    
+  }catch(err){
+
+  }
+}
+
+exports.getClientLedgerAdmin = async (req, res) => {
+  try {
+    const { clientId } = req.params;
+
+    const cacheKey = `admin:ledger:${clientId}`;
+
+    const ledger = await cache(
+      cacheKey,
+      async () => {
+        const works = await Work.find({ client: clientId })
+          .populate("client", "firstName lastName phone email")
+          .populate("assignedTechnician", "firstName lastName phone")
+          .sort({ createdAt: -1 });
+
+        let totalBilled = 0;
+        let totalPaid = 0;
+
+        const history = works.map(work => {
+          const invoiceTotal = work.invoice?.total || 0;
+          const isPaid = work.payment?.status === "payment_done";
+
+          totalBilled += invoiceTotal;
+          if (isPaid) totalPaid += invoiceTotal;
+
+          return {
+            workId: work._id,
+            workToken: work.token,
+            serviceType: work.serviceType,
+            status: work.status,
+
+            technician: work.assignedTechnician
+              ? {
+                  name: `${work.assignedTechnician.firstName} ${work.assignedTechnician.lastName}`,
+                  phone: work.assignedTechnician.phone
+                }
+              : null,
+
+            invoice: {
+              invoiceNumber: work.invoice?.invoiceNumber || null,
+              total: invoiceTotal,
+              pdfUrl: work.invoice?.pdfUrl || null
+            },
+
+            payment: {
+              method: work.payment?.method || null,
+              status: work.payment?.status || "pending",
+              paidAt: work.payment?.paidAt || null
+            },
+
+            createdAt: work.createdAt,
+            completedAt: work.completedAt
+          };
+        });
+
+        return {
+          client: works[0]?.client || null,
+          summary: {
+            totalWorks: works.length,
+            totalBilled,
+            totalPaid,
+            totalPending: totalBilled - totalPaid
+          },
+          history
+        };
+      },
+      120 
+    );
+
+    res.status(200).json({
+      success: true,
+      ledger
+    });
+
+  } catch (err) {
+    console.error("Get client ledger error", err);
+    res.status(500).json({
+      success: false,
+      message: "Unable to fetch client ledger"
+    });
   }
 };
 

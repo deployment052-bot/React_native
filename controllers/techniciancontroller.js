@@ -10,8 +10,10 @@ const Work = require("../model/work");
 const User = require("../model/user");
 const Bill = require("../model/Bill");
 const Booking=require('../model/BookOrder')
+const admin = require("firebase-admin");
 const projectRoot = process.cwd();
 const invoicesFolder = path.join(projectRoot, "invoices");
+const {chagestatus}=require('../utils/socketEmitter')
 
 
 if (!fs.existsSync(invoicesFolder)) {
@@ -171,18 +173,19 @@ clickableUPI = `https://upi.me/pay?pa=${finalUpi}&pn=${name}&am=${totalAmount}&c
 
 
   
-    work.status = "work_completed";
+    work.status = "completed";
     work.completedAt = new Date();
     work.billId = bill._id;
     await work.save();
+    chagestatus(work);
    await Booking.findOneAndUpdate(
       {
         technician: technicianId,
         user: work.client._id,
-        status: { $in: ["Requested", "approved", "on_the_way", "inprogress"] } // only active bookings
+        status: { $in: ["Requested", "approved", "dispatch", "inprogress"] } // only active bookings
       },
       {
-        status: "work_completed",
+        status: "completed",
         completedAt: new Date() // optional
       },
       { new: true }
@@ -197,6 +200,21 @@ clickableUPI = `https://upi.me/pay?pa=${finalUpi}&pn=${name}&am=${totalAmount}&c
   "work_completed",
   `work-${userId.token}`
 )
+const clientUser = await User.findById(userId.client).select("fcmToken");
+if (clientUser?.fcmToken) {
+  await admin.messaging().send({
+    token: clientUser.fcmToken,
+    notification: {
+      title: "work_completed",
+      body: `Your technician ${technician.firstName} has been work completed.Please pay your bill for the service type: ${userId.serviceType}`,
+ 
+    },
+    data: {
+      type: "work_completed",
+      link: `work-${userId.token}`,
+    },
+  });
+}
  return res.status(200).json({
   success: true,
   bill: {
@@ -239,13 +257,13 @@ exports.getTechnicianSummary1 = async (req, res) => {
 
     const activeCount = await Work.countDocuments({
       assignedTechnician: technicianId,
-      status: { $in: ["om_the_way", "inprogress"] },
+      status: { $in: ["on_the_way", "inprogress", "dispatch"] },
     });
 
   
     const completedCount = await Work.countDocuments({
       assignedTechnician: technicianId,
-      status: "work_completed",
+      status: "ompleted",
     });
 
  
@@ -257,7 +275,7 @@ exports.getTechnicianSummary1 = async (req, res) => {
    
     const completedWorks = await Work.find({
       assignedTechnician: technicianId,
-      status: "work_completed",
+      status: "completed",
     });
 
     const totalEarnings = completedWorks.reduce((sum, work) => {
@@ -350,11 +368,11 @@ exports.approveJob = async (req, res) => {
       return res.status(400).json({ message: "No technician assigned to this work" });
     }
 
-    if (work.assignedTechnician.toString() !== technicianId.toString()) {
-      return res.status(403).json({ message: "You are not authorized to approve this job" });
-    }
+    // if (work.assignedTechnician.toString() !== technicianId.toString()) {
+    //   return res.status(403).json({ message: "You are not authorized to approve this job" });
+    // }
 
-   
+       work.status = "approved";
 
    await sendNotification(
   userId,
@@ -364,7 +382,21 @@ exports.approveJob = async (req, res) => {
   "booking_confirmed",
   `work-${userId.token}`
 );
-
+const clientUser = await User.findById(userId.client).select("fcmToken");
+if (clientUser?.fcmToken) {
+  await admin.messaging().send({
+    token: clientUser.fcmToken,
+    notification: {
+      title: "Booking Confirmed",
+      body: `Your technician ${technicianId.firstName} has been Approved your request service type: ${userId.serviceType}`,
+ 
+    },
+    data: {
+      type: "Booking Confirmed",
+      link: `work-${userId.token}`,
+    },
+  });
+}
     res.status(200).json({
       success: true,
       message: "Job approved successfully",
@@ -387,9 +419,9 @@ exports.getTechnicianSummarybycount = async (req, res) => {
       .populate("billId")
       .sort({ createdAt: -1 });
 
-    const completed = works.filter(w => w.status === "work_completed");
-    const inProgress = works.filter(w => ["inprogress", "payment_done"].includes(w.status));
-    const upcoming = works.filter(w => ["approved", "on_the_way", "open"].includes(w.status));
+    const completed = works.filter(w => w.status === "completed");
+    const inProgress = works.filter(w => ["inprogress", "payment_done"|| "confirm"].includes(w.status));
+    const upcoming = works.filter(w => ["approved", "on_the_way", "open", "dispatch"].includes(w.status));
     const onHold = works.filter(w => ["onhold_parts", "rescheduled", "escalated"].includes(w.status));
 
     const totalEarnings = works.reduce((sum, w) => sum + (w.billId?.totalAmount || 0), 0);
@@ -442,9 +474,9 @@ exports.getAllTechnicianWorks = async (req, res) => {
 
    
     const categorized = {
-      completed: works.filter(w => w.status === "work_completed"),
-      inProgress: works.filter(w => ["inprogress", "payment_done"].includes(w.status)),
-      upcoming: works.filter(w => ["approved", "on_the_way",  "open"].includes(w.status)),
+      completed: works.filter(w => w.status === "completed"),
+      inProgress: works.filter(w => ["inprogress", "payment_done" || "confirm"].includes(w.status)),
+      upcoming: works.filter(w => ["approved", "on_the_way",  "open", "dispatch"].includes(w.status)),
       onHold: works.filter(w => ["onhold_parts", "rescheduled", "escalated"].includes(w.status)),
     };
 
@@ -517,27 +549,27 @@ exports.confirmPayment = async (req, res) => {
     );
 
     const pdfBuffer = fs.readFileSync(receiptFilePath);
-    // const emailBody = `
-    //   <p>Hello ${work.client.firstName || ""},</p>
-    //   <p>Your payment for Work ID <b>${work.token}</b> has been successfully confirmed.</p>
-    //   <p><b>Payment Method:</b> ${paymentMethod.toUpperCase()}</p>
-    //   <p><b>Technician:</b> ${work.assignedTechnician.firstName}</p>
-    //   <p>Your payment receipt is attached as a PDF.</p>
-    // `;
+    const emailBody = `
+      <p>Hello ${work.client.firstName || ""},</p>
+      <p>Your payment for Work ID <b>${work.token}</b> has been successfully confirmed.</p>
+      <p><b>Payment Method:</b> ${paymentMethod.toUpperCase()}</p>
+      <p><b>Technician:</b> ${work.assignedTechnician.firstName}</p>
+      <p>Your payment receipt is attached as a PDF.</p>
+    `;
 
-    // await sendEmail(
-    //   work.client.email,
-    //   "Payment Receipt - Thank You",
-    //   emailBody,
-    //   [
-    //     {
-    //       content: pdfBuffer.toString("base64"),
-    //       filename: `payment_receipt_${work.token}.pdf`,
-    //       type: "application/pdf",
-    //       disposition: "attachment",
-    //     },
-    //   ]
-    // );
+    await sendEmail(
+      work.client.email,
+      "Payment Receipt - Thank You",
+      emailBody,
+      [
+        {
+          content: pdfBuffer.toString("base64"),
+          filename: `payment_receipt_${work.token}.pdf`,
+          type: "application/pdf",
+          disposition: "attachment",
+        },
+      ]
+    );
 
    await sendNotification(
   userId.client,
@@ -547,6 +579,22 @@ exports.confirmPayment = async (req, res) => {
   "payment_received",
   `work-${userId.token}`
 )
+const clientUser = await User.findById(userId.client).select("fcmToken");
+if (clientUser?.fcmToken) {
+  await admin.messaging().send({
+    token: clientUser.fcmToken,
+    notification: {
+      title: "payment_Done",
+      body: `Your Payment done. Thanks for choosing us`,
+ 
+    },
+    data: {
+      type: "payment_Done",
+      link: `work-${userId.token}`,
+    },
+  });
+}
+
     res.status(200).json({
       success: true,
       message: "Payment confirmed successfully by technician.",
@@ -683,3 +731,33 @@ exports.needPartRequest = async (req, res) => {
 };
 
 
+exports.generatePaymentReceiptPDF = async (req, res) => {
+  try{
+    const {workId}=req.params;
+    const userId=req.user._id;
+    const work=await Work.findById(workId).populate("client assignedTechnician");
+    if(!work){
+      return res.status(404).json({message:"work not found"});
+    }
+    if(String(work.client._id)!==String(userId)){
+      return res.status(403).json({message:"unauthorized access to receipt PDF"});
+    }
+    if(work.payment?.status!=="paymemnt_done"){
+      return res.status(400).json({message:"payment not completed yet"});
+    }
+  const receiptFilePath=path.join(
+    invoicesFolder,
+    `Invoice_${work.token}.pdf`
+  )
+   if(!fs.existsSync(receiptFilePath)){
+    return res.status(404).json({message:"receipt PDF not found"});
+   }
+   res.download(
+    receiptFilePath,
+        `Invoice_${work.token}.pdf`
+   )
+}catch(err){
+    console.error("Generate Payment Receipt PDF Error:", err);
+}
+
+}

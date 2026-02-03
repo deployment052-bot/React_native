@@ -11,17 +11,28 @@ const userSchema = new mongoose.Schema({
   confirmPassword: { type: String }, 
   role: {
     type: String,
-    enum: ["client", "technician", "admin"],
+    enum: ["client", "technician", "admin","Hod","TL"],
     default: "client",
   },
-  isActive: { type: Boolean, default: true },
+  fcmToken: { type: String },
+  isActive: { type: Boolean, default: true },// tech
   createdAt: { type: Date, default: Date.now },
 
   //admin degignation like hr admin , store admin
 designation:{
   type:String,
 },
-  
+//hod type
+  HodType:{type:String,
+  enum:["opretion_department","electrical_departmemnt","plumbing_department","etc_department"]
+  },  // 
+
+// tl type 
+  TLType:{type:String,
+  enum:["opretion_department","plumber_lead","elctrical_lead","ac_repair_lead"]
+  },
+
+// googleId
   googleId: String,
   facebookId: String,
 
@@ -59,12 +70,33 @@ designation:{
   department: String,
   permissions: [String],
 
- 
+ manualLocation: String,
   isEmailVerified: { type: Boolean, default: false },
   emailOTP: String,
   emailOTPExpires: Date,
+
+  isPhoneVerified: { type: Boolean, default: false },
   phoneOTP: String,
   phoneOTPExpires: Date,
+
+  isProfileCompleted: { type: Boolean, default: false },
+otpResendCount: {
+  type: Number,
+  default: 0
+},
+otpLastSentAt: Date,
+
+
+
+
+
+// assignpart
+assignedTL: {
+  type: mongoose.Schema.Types.ObjectId,
+  ref: "User"
+}
+
 });
+
 
 module.exports = mongoose.model("User", userSchema);

@@ -11,7 +11,7 @@ const {
   WorkStart,
   WorkComplete,
   trackTechnician,
-  updateLocation,getClientWorkStatus,reportWorkIssue,getAdminNotifications,getLocation,saveLocation,getRoutes,selectRoute,subscribe,getSubscribers
+  updateLocation,getClientWorkStatus,reportWorkIssue,generatePaymentRecei,getLocation,saveLocation,getRoutes,selectRoute,subscribe,getSubscribers
 } = require('../controllers/workController');
 const { 
  completeWorkAndGenerateBill ,getTechnicianSummary
@@ -56,6 +56,41 @@ router.put('/work/select-route/:workId', protect, authorize('technician'), selec
 
 router.post('/subcribe',subscribe)
 router.get('/getsub',protect,authorize('admin'),getSubscribers)
+router.post('/paybill/:workId',protect, authorize('client'),generatePaymentRecei)
 
+// app.post("/work/:workId/upload-invoice", upload.single("file"), async (req, res) => {
+//   try {
+//     const workId = req.params.workId;
+//     const filePath = req.file.path;
+
+
+//     const { data: { text } } = await tesseract.recognize(filePath, "eng");
+
+
+//     const invoiceNumber = text.match(/BILL-\w+-\d+/)?.[0] || null;
+//     const totalAmount = text.match(/Total Bill:\s*([\d.]+)/)?.[1] || null;
+
+   
+//     const work = await Work.findByIdAndUpdate(
+//       workId,
+//       {
+//         "invoice.invoiceNumber": invoiceNumber,
+//         "invoice.total": totalAmount,
+//         "invoice.pdfUrl": filePath,
+//       },
+//       { new: true }
+//     );
+
+   
+//     res.json({
+//       message: "Invoice uploaded & parsed",
+//       invoiceNumber: work.invoice.invoiceNumber,
+//       totalAmount: work.invoice.total,
+//     });
+//   } catch (err) {
+//     console.error(err);
+//     res.status(500).send("Error processing invoice");
+//   }
+// });
 
 module.exports = router;

@@ -15,10 +15,12 @@
     "Requested",
     "booking_confirmed",
     "technician_on_the_way",
-    
+    "issue_reported",
+    "issue_resolved",
     "new_work",
     "work_started",
     "work_completed",
+    "payment_Done",
     "payment_received",
     "technician_arrived"
   ],
