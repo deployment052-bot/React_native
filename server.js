@@ -16,14 +16,14 @@ const sendNotification = require('./model/Notification');
 const { client: redisClient, connectRedis } = require('./utils/redis');
 const RedisStore = require("connect-redis").default;
 
-// Firebase Admin
-const admin = require("firebase-admin");
-admin.initializeApp({
-  credential: admin.credential.cert(
-    require(process.env.FIREBASE_SERVICE_ACCOUNT_KEY_PATH)
-  ),
-});
-console.log("Firebase Admin initialized");
+// // Firebase Admin
+// const admin = require("firebase-admin");
+// admin.initializeApp({
+//   credential: admin.credential.cert(
+//     require(process.env.FIREBASE_SERVICE_ACCOUNT_KEY_PATH)
+//   ),
+// });
+// console.log("Firebase Admin initialized");
 
 const app = express();
 const server = http.createServer(app);
