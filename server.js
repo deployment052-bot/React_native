@@ -1,153 +1,172 @@
-const express = require('express');
-const mongoose = require('mongoose');
-const cors = require('cors');
-const path = require('path');
+const express = require("express");
+const mongoose = require("mongoose");
+const cors = require("cors");
 const passport = require("passport");
 const session = require("express-session");
 const http = require("http");
 const { Server } = require("socket.io");
-const { createAdapter } = require("@socket.io/redis-adapter");
-
-require("dotenv").config(); 
-
-const sendNotification = require('./model/Notification');
-
-// Redis setup
-const { client: redisClient, connectRedis } = require('./utils/redis');
-const RedisStore = require("connect-redis").default;
-
-// // Firebase Admin
-// const admin = require("firebase-admin");
-// admin.initializeApp({
-//   credential: admin.credential.cert(
-//     require(process.env.FIREBASE_SERVICE_ACCOUNT_KEY_PATH)
-//   ),
-// });
-// console.log("Firebase Admin initialized");
+const os = require("os");
+require("dotenv").config();
 
 const app = express();
 const server = http.createServer(app);
 
+/* ============================
+   SOCKET.IO SETUP
+============================ */
+
 const io = new Server(server, {
   cors: {
-    origin: "*",
+    origin: [
+      "http://localhost:5173",
+      "https://honeydew-ibex-486236.hostingersite.com",
+      "https://fantastic-pie-84a677.netlify.app",
+    ],
     credentials: true,
-  }
+  },
 });
-module.exports.io = io;
-global.io = io;
 
-// Socket.IO connection
+global.io = io;
+module.exports.io = io;
+
 io.on("connection", (socket) => {
-  console.log("Socket connected:", socket.id);
+  console.log("✅ Socket connected:", socket.id);
+
   socket.on("disconnect", () => {
-    console.log("Socket disconnected:", socket.id);
+    console.log("❌ Socket disconnected:", socket.id);
   });
 });
+
+/* ============================
+   PASSPORT CONFIG
+============================ */
 
 require("./config/passport");
 
-// Middleware
-app.use(cors({
-  origin: [
-    "http://localhost:5173",
-    "https://whimsical-fenglisu-4a7b67.netlify.app"
-  ],
-  credentials: true,
-}));
+/* ============================
+   MIDDLEWARE
+============================ */
+
+app.use(
+  cors({
+    origin: [
+      "http://localhost:5173",
+      "https://honeydew-ibex-486236.hostingersite.com",
+      "https://fantastic-pie-84a677.netlify.app",
+    ],
+    credentials: true,
+  })
+);
+
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-(async () => {
-  await connectRedis();
-  console.log("Redis ready for scaling");
+/* ============================
+   SESSION
+============================ */
 
-  const pubClient = redisClient;
-  const subClient = redisClient.duplicate();
-  await subClient.connect();
-
-  io.adapter(createAdapter(pubClient, subClient));
-
-  app.use(session({
-    store: new RedisStore({ client: redisClient }),
-    secret: process.env.SESSION_SECRET,
+app.use(
+  session({
+    name: "ims.sid",
+    secret: process.env.SESSION_SECRET || "supersecretkey",
     resave: false,
     saveUninitialized: false,
+
     cookie: {
+      httpOnly: true,
       secure: process.env.NODE_ENV === "production",
       sameSite: "none",
-      maxAge: 1000 * 60 * 60 * 24,
-    }
-  }));
+      maxAge: 1000 * 60 * 60 * 24, // 1 day
+    },
+  })
+);
 
-  app.use(passport.initialize());
-  app.use(passport.session());
+app.use(passport.initialize());
+app.use(passport.session());
 
-  // Routes
-  app.use('/auth', require('./routes/authRoute'));
-  app.use('/api', require('./routes/work'));
-  app.use('/api', require('./routes/admin'));
-  app.use('/otp', require('./routes/otpRoutes'));
-  app.use('/forget', require('./routes/forgotpassword'));
-  app.use('/service', require('./routes/service'));
-  app.use('/technicaian', require('./routes/technicianRoutes'));
-  app.use('/ims', require('./routes/ssologin'));
-  app.use('/profile', require('./routes/profileRoutes'));
-  app.use('/notification', require('./routes/notificationroute'));
-  // app.use('/check', require('./routes/checkroute'));
-  app.use('/serviceCard', require('./routes/serviceroute'));
+/* ============================
+   ROUTES
+============================ */
 
-  // Conditional loading for Linux/Windows
+app.use("/auth", require("./routes/authRoute"));
+app.use("/api", require("./routes/work"));
+app.use("/api", require("./routes/admin"));
+app.use("/otp", require("./routes/otpRoutes"));
+app.use("/forget", require("./routes/forgotpassword"));
+app.use("/service", require("./routes/service"));
+app.use("/technicaian", require("./routes/technicianRoutes"));
+app.use("/ims", require("./routes/ssologin"));
+app.use("/profile", require("./routes/profileRoutes"));
+app.use("/notification", require("./routes/notificationroute"));
+app.use("/serviceCard", require("./routes/serviceroute"));
 
-    app.use('/ocr', require('./utils/ocr'));
-    app.use('/phone', require('./native_code/route/authregister'));
-    app.use('/phoneclient', require('./native_code/route/clinetRoute'));
-    console.log("Windows-specific routes loaded");
- 
+/* ============================
+   WINDOWS ONLY NATIVE ROUTE
+============================ */
 
+if (process.platform === "win32") {
+  console.log("✅ Windows detected → Native phone module enabled");
 
-  // Test notification
-  app.get("/test-notif", async (req, res) => {
-    const testUserId = "id-of-a-user";
-    const notif = await sendNotification(
-      testUserId,
-      "client",
-      "Test Notification",
-      "This is a test message",
-      "info",
-      "/"
-    );
-    res.send(notif);
-  });
+  app.use("/phone", require("./native_code/route/authregister"));
+} else {
+  console.log("⚠️ Linux detected → Native phone disabled");
 
-  app.get('/', (req, res) => {
-    res.send('Server running with Firebase, Redis & Socket.IO!');
-  });
-
-  app.get('/health', (req, res) => {
-    res.json({
-      status: "ok",
-      instance: process.pid,
-      timestamp: new Date()
+  app.use("/phone", (req, res) => {
+    res.status(503).json({
+      success: false,
+      message: "Phone service not supported on Linux server",
     });
   });
+}
 
-  // Error handler
-  app.use((err, req, res, next) => {
-    console.error('Error:', err.stack);
-    res.status(500).json({ message: 'Something went wrong!', error: err.message });
+/* ============================
+   DATABASE
+============================ */
+
+mongoose
+  .connect(process.env.MONGO_URL)
+  .then(() => console.log("✅ MongoDB connected"))
+  .catch((err) => {
+    console.error("❌ MongoDB error:", err.message);
+    process.exit(1);
   });
 
-  // MongoDB & server start
-  if (process.env.NODE_ENV !== "test") {
-    mongoose.connect(process.env.MONGO_URL)
-      .then(() => console.log('MongoDB connected'))
-      .catch(err => console.log('MongoDB connection error:', err));
+/* ============================
+   ROUTES
+============================ */
 
-    const PORT = process.env.PORT || 5000;
-    server.listen(PORT, "0.0.0.0", () => {
-      console.log(`Server running with Socket.IO & Redis session on port ${PORT}`);
-    });
-  }
+app.get("/", (req, res) => {
+  res.send("✅ Server running fine with Socket.IO & Auth");
+});
 
-})();
+app.get("/health", (req, res) => {
+  res.json({
+    status: "ok",
+    pid: process.pid,
+    time: new Date(),
+  });
+});
+
+/* ============================
+   ERROR HANDLER
+============================ */
+
+app.use((err, req, res, next) => {
+  console.error("❌ Error:", err.stack);
+
+  res.status(500).json({
+    success: false,
+    message: "Internal Server Error",
+    error: err.message,
+  });
+});
+
+/* ============================
+   SERVER START
+============================ */
+
+const PORT = process.env.PORT || 5000;
+
+server.listen(PORT, "0.0.0.0", () => {
+  console.log(`🚀 Server running on port ${PORT}`);
+});
