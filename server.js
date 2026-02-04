@@ -98,14 +98,13 @@ app.use(express.urlencoded({ extended: true }));
   app.use('/serviceCard', require('./routes/serviceroute'));
 
   // Conditional loading for Linux/Windows
-  if (process.platform === "win32") {
+
     app.use('/ocr', require('./utils/ocr'));
     app.use('/phone', require('./native_code/route/authregister'));
     app.use('/phoneclient', require('./native_code/route/clinetRoute'));
     console.log("Windows-specific routes loaded");
-  } else {
-    console.log("Skipping Windows-only routes for Linux");
-  }
+ 
+
 
   // Test notification
   app.get("/test-notif", async (req, res) => {
