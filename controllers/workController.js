@@ -1450,3 +1450,27 @@ exports.rescheduleOrder = async (req, res) => {
     });
   }
 };
+
+
+exports.getWorkStatus = async (req, res) => {
+  try {
+    const { workId } = req.params;
+
+    const work = await Work.findById(workId)
+      .select("status token updatedAt");
+
+    if (!work) {
+      return res.status(404).json({ message: "Work not found" });
+    }
+
+    res.json({
+      workId: work._id,
+      status: work.status,
+      token: work.token,
+      updatedAt: work.updatedAt,
+    });
+
+  } catch {
+    res.status(500).json({ message: "Server error" });
+  }
+};

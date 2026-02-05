@@ -11,7 +11,7 @@ const {
   WorkStart,
   WorkComplete,
   trackTechnician,
-  updateLocation,getClientWorkStatus,reportWorkIssue,generatePaymentRecei,getLocation,saveLocation,getRoutes,selectRoute,subscribe,getSubscribers
+  updateLocation,getClientWorkStatus,reportWorkIssue,generatePaymentRecei,getLocation,saveLocation,getRoutes,selectRoute,subscribe,getSubscribers,getWorkStatus
 } = require('../controllers/workController');
 const { 
  completeWorkAndGenerateBill ,getTechnicianSummary
@@ -57,6 +57,10 @@ router.put('/work/select-route/:workId', protect, authorize('technician'), selec
 router.post('/subcribe',subscribe)
 router.get('/getsub',protect,authorize('admin'),getSubscribers)
 router.post('/paybill/:workId',protect, authorize('client'),generatePaymentRecei)
+router.get(
+  "/work/status/:workId",protect, authorize('client')
+  ,getWorkStatus
+);
 
 // app.post("/work/:workId/upload-invoice", upload.single("file"), async (req, res) => {
 //   try {
