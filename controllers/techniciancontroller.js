@@ -13,7 +13,10 @@ const Booking=require('../model/BookOrder')
 const admin = require("firebase-admin");
 const projectRoot = process.cwd();
 const invoicesFolder = path.join(projectRoot, "invoices");
-const {chagestatus}=require('../utils/socketEmitter')
+const {
+  emitWorkStatus,
+  emitTechnicianLocation
+} = require("../utils/socketEmitter");
 
 
 if (!fs.existsSync(invoicesFolder)) {
@@ -177,7 +180,8 @@ clickableUPI = `https://upi.me/pay?pa=${finalUpi}&pn=${name}&am=${totalAmount}&c
     work.completedAt = new Date();
     work.billId = bill._id;
     await work.save();
-    chagestatus(work);
+    
+emitWorkStatus(work);
    await Booking.findOneAndUpdate(
       {
         technician: technicianId,
@@ -373,7 +377,7 @@ exports.approveJob = async (req, res) => {
     // }
 
        work.status = "approved";
-
+emitWorkStatus(work);
    await sendNotification(
   userId,
   "client",
@@ -534,6 +538,7 @@ exports.confirmPayment = async (req, res) => {
    
     work.status = "payment_done";
     await work.save();
+    emitWorkStatus(work);
  const receiptFilePath = path.join(
       invoicesFolder,
       `payment_receipt_${work.token}.pdf`

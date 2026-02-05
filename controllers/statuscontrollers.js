@@ -269,3 +269,10 @@ exports.getTechnicianWorkStatus = async (req, res) => {
   }
 
 };
+
+
+exports.statusbaarcheck=async(req,res)=>{
+  try{
+         
+  }catch(err){}
+}

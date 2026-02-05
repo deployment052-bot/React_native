@@ -16,7 +16,12 @@ const projectRoot = process.cwd();
 const invoicesFolder = path.join(projectRoot, "invoices");
 
 const { uploadToCloudinary } = require("../utils/cloudinaryUpload");
-const {changeStatus}=require('../utils/socketEmitter')
+
+const {
+  emitWorkStatus,
+  emitTechnicianLocation
+} = require("../utils/socketEmitter");
+
 
 const generateToken = (id) => {
   return `REQ-${new Date().getFullYear()}-${String(id).padStart(5, '0')}`;
@@ -264,7 +269,8 @@ if (technicianId && mongoose.Types.ObjectId.isValid(technicianId)) {
       date: parsedDate ? parsedDate.objectDate : null,
       formattedDate: parsedDate ? parsedDate.formatted : null,
     });
-console.log(work)
+    emitWorkStatus(work);
+// console.log(work)
     res.status(201).json({
       message: "Work request submitted successfully",
       work,
@@ -340,10 +346,12 @@ exports.bookTechnician = async (req, res) => {
       {
         assignedTechnician: technicianId,
         status: "approved"
+      
+
       },
       { new: true }
     );
-
+  emitWorkStatus(lockedWork);
     // if (!lockedWork) {
     //   return res.status(400).json({
     //     message: "This work has already been booked"
@@ -474,6 +482,8 @@ exports.WorkStart = async (req, res) => {
     work.startedAt = new Date();
     // work.beforephoto = beforePhotoUrl; 
     await work.save(); 
+    
+emitWorkStatus(work);
   // changeStatus(work);
 //     await sendNotification(
 //   work.client._id, 
