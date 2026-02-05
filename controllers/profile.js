@@ -18,6 +18,7 @@ exports.updateProfileClient = async (req, res) => {
     const allowedUpdates = [
       "firstName",
       "lastName",
+       "email",
       "phone",
       "address",
       "avatar",
