@@ -390,7 +390,7 @@ exports.bookTechnician = async (req, res) => {
       formattedTime: time,
       status: "open"
     });
-    changeStatus(work);
+    
     res.status(201).json({
       message: "Technician booked successfully",
       booking,
@@ -474,7 +474,7 @@ exports.WorkStart = async (req, res) => {
     work.startedAt = new Date();
     // work.beforephoto = beforePhotoUrl; 
     await work.save(); 
-  changeStatus(work);
+  // changeStatus(work);
 //     await sendNotification(
 //   work.client._id, 
 //   "client", 
