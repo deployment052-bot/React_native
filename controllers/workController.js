@@ -300,10 +300,10 @@ exports.bookTechnician = async (req, res) => {
       serviceCharge,
       description,
     } = req.body;
-
+  
     const userId = req.user._id;
 
-    
+    console.log(req.body)
     if (!mongoose.Types.ObjectId.isValid(workId))
       return res.status(400).json({ message: "Invalid Work ID" });
 
@@ -1292,6 +1292,8 @@ exports.cancelOrder = async (req, res) => {
         message: "Cancel reason is required",
       });
     }
+    console.log(req.params)
+    console.log(req.body)
 
     const work = await Work.findById(workId);
 
@@ -1315,37 +1317,37 @@ exports.cancelOrder = async (req, res) => {
     work.cancelReason = cancelReason;
     work.cancelledBy = "client";
     work.cancelledAt = new Date();
-
+      emitWorkStatus(work);
     await work.save();
 
     
 
-    await sendNotification(
-      work.technician,
-      "technician",
-      "Order Cancelled",
-      `Client has cancelled the order. Reason: ${cancelReason}`,
-      "order_cancelled",
-      `work-${work._id}`
-    );
+    // await sendNotification(
+    //   work.technician,
+    //   "technician",
+    //   "Order Cancelled",
+    //   `Client has cancelled the order. Reason: ${cancelReason}`,
+    //   "order_cancelled",
+    //   `work-${work._id}`
+    // );
 
-    const technicianUser = await User.findById(work.technician).select(
-      "fcmToken"
-    );
+    // const technicianUser = await User.findById(work.technician).select(
+    //   "fcmToken"
+    // );
 
-    if (technicianUser?.fcmToken) {
-      await admin.messaging().send({
-        token: technicianUser.fcmToken,
-        notification: {
-          title: "Order Cancelled",
-          body: `Client cancelled the order. Reason: ${cancelReason}`,
-        },
-        data: {
-          type: "ORDER_CANCELLED",
-          link: `work-${work._id}`,
-        },
-      });
-    }
+    // if (technicianUser?.fcmToken) {
+    //   await admin.messaging().send({
+    //     token: technicianUser.fcmToken,
+    //     notification: {
+    //       title: "Order Cancelled",
+    //       body: `Client cancelled the order. Reason: ${cancelReason}`,
+    //     },
+    //     data: {
+    //       type: "ORDER_CANCELLED",
+    //       link: `work-${work._id}`,
+    //     },
+    //   });
+    // }
 
     return res.status(200).json({
       success: true,
@@ -1365,91 +1367,117 @@ exports.rescheduleOrder = async (req, res) => {
   try {
     const clientId = req.user._id;
     const { workId } = req.params;
+    const { date } = req.body;
 
     const work = await Work.findById(workId);
 
     if (!work) {
-      return res.status(404).json({
-        success: false,
-        message: "Work not found",
-      });
+      return res.status(404).json({ message: "Work not found" });
     }
 
     if (work.client.toString() !== clientId.toString()) {
       return res.status(403).json({
-        success: false,
         message: "You are not allowed to reschedule this order",
       });
     }
 
-   
-    const oldTechnicianId = work.technician || work.assignedTechnician;
+    // 🟢 Parse Date (same as createWork)
+    const parsedDate = date ? parseClientDate(date) : null;
+    if (date && !parsedDate) {
+      return res.status(400).json({ message: "Invalid date format" });
+    }
 
-  
-    work.status = "rescheduled";
+    if (parsedDate) parsedDate.objectDate.setHours(0, 0, 0, 0);
+
+    // 🟢 Remove old technician
+    const oldTechnicianId = work.assignedTechnician;
+    work.assignedTechnician = null;
+
+    // 🟢 Update work fields
+    work.date = parsedDate ? parsedDate.objectDate : null;
+    work.formattedDate = parsedDate ? parsedDate.formatted : null;
+    work.status = "open";
     work.rescheduledAt = new Date();
+
     await work.save();
 
- 
-    if (oldTechnicianId) {
-      const message =
-        "Client has rescheduled this job. This job is no longer active.";
+    // ===============================
+    // 🔥 SAME TECHNICIAN MATCHING LOGIC
+    // ===============================
 
-      await sendNotification(
-        oldTechnicianId,
-        "technician",
-        "Job Rescheduled",
-        message,
-        "job_rescheduled",
-        `work-${work._id}`
+    const specs = work.specialization;
+
+    const technicians = await User.find({
+      role: "technician",
+      specialization: { $in: specs },
+    });
+
+    let bookedTechIds = [];
+
+    if (parsedDate) {
+      const dayStart = new Date(parsedDate.objectDate);
+      dayStart.setHours(0, 0, 0, 0);
+
+      const dayEnd = new Date(parsedDate.objectDate);
+      dayEnd.setHours(23, 59, 59, 999);
+
+      const bookedWorks = await Work.find({
+        _id: { $ne: work._id }, // 👈 current work exclude
+        date: { $gte: dayStart, $lte: dayEnd },
+        assignedTechnician: { $ne: null },
+        status: { $in: ["open", "approved", "dispatch", "inprogress"] },
+      }).select("assignedTechnician");
+
+      bookedTechIds = bookedWorks.map(w =>
+        w.assignedTechnician.toString()
       );
+    }
 
-      const technicianUser = await User.findById(oldTechnicianId).select(
-        "fcmToken"
-      );
+    const R = 6371;
+    const matchingTechnicians = [];
 
-      if (technicianUser?.fcmToken) {
-        await admin.messaging().send({
-          token: technicianUser.fcmToken,
-          notification: {
-            title: "Job Rescheduled",
-            body: message,
-          },
-          data: {
-            type: "JOB_RESCHEDULED",
-            workId: work._id.toString(),
-          },
+    for (const tech of technicians) {
+      if (!tech.coordinates?.lat || !tech.coordinates?.lng) continue;
+      if (bookedTechIds.includes(tech._id.toString())) continue;
+
+      const dLat =
+        ((tech.coordinates.lat - work.coordinates.lat) * Math.PI) / 180;
+      const dLng =
+        ((tech.coordinates.lng - work.coordinates.lng) * Math.PI) / 180;
+
+      const a =
+        Math.sin(dLat / 2) ** 2 +
+        Math.cos((work.coordinates.lat * Math.PI) / 180) *
+          Math.cos((tech.coordinates.lat * Math.PI) / 180) *
+          Math.sin(dLng / 2) ** 2;
+
+      const distance =
+        R * (2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)));
+
+      if (distance <= 70) {
+        matchingTechnicians.push({
+          ...tech.toObject(),
+          distanceInKm: distance.toFixed(2),
+          employeeStatus: "available",
         });
       }
     }
 
- 
+    // ===============================
+
     return res.status(200).json({
       success: true,
-      message: "Redirect to create work",
-      redirectTo: "CREATE_WORK",
-      workData: {
-        serviceType: work.serviceType,
-        specialization: work.specialization,
-        description: work.description,
-        serviceCharge: work.serviceCharge,
-
-        lat: work.coordinates?.lat,
-        lng: work.coordinates?.lng,
-        manualLocation: work.manualLocation,
-
-        date: work.formattedDate,
-      },
+      message: "Work updated successfully",
+      work,
+      matchingTechnicians,
     });
 
   } catch (err) {
     console.error("Reschedule Error:", err);
-    res.status(500).json({
-      success: false,
-      message: "Server error",
-    });
+    res.status(500).json({ message: "Server error" });
   }
 };
+
 
 
 exports.getWorkStatus = async (req, res) => {

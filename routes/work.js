@@ -11,7 +11,7 @@ const {
   WorkStart,
   WorkComplete,
   trackTechnician,
-  updateLocation,getClientWorkStatus,reportWorkIssue,generatePaymentRecei,getLocation,saveLocation,getRoutes,selectRoute,subscribe,getSubscribers,getWorkStatus
+  updateLocation,getClientWorkStatus,reportWorkIssue,generatePaymentRecei,getLocation,saveLocation,getRoutes,selectRoute,subscribe,getSubscribers,getWorkStatus,cancelOrder,rescheduleOrder
 } = require('../controllers/workController');
 const { 
  completeWorkAndGenerateBill ,getTechnicianSummary
@@ -96,5 +96,8 @@ router.get(
 //     res.status(500).send("Error processing invoice");
 //   }
 // });
+ 
 
+router.post("/cancel-order/:workId",protect,authorize('client'),cancelOrder);
+router.post("/re-order/:workId",protect,authorize('client'),rescheduleOrder);
 module.exports = router;

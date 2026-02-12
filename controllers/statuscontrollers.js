@@ -9,15 +9,37 @@ const axios = require("axios");
 exports.getAllWorks = async (req, res) => {
   try {
     const clientId = req.user._id;
+    const { status } = req.query;
+    const filter = { client: clientId };
 
-   
-    const works = await Work.find({ client: clientId })
+    // console.log("Query Params:", req.query);
+
+
+    if (status) {
+      const statusArray = Array.isArray(status)
+        ? status
+        : status.split(",").map((s) => s.trim());
+
+      filter.status =
+        statusArray.length === 1
+          ? statusArray[0]
+          : { $in: statusArray };
+    }
+
+    const works = await Work.find(filter)
       .populate("client", "name email phone")
-      .populate("assignedTechnician", "firstName lastName email phone specialization ratings _id")
+      .populate(
+        "assignedTechnician",
+        "firstName lastName email phone specialization ratings _id"
+      )
       .sort({ createdAt: -1 });
 
     if (!works.length) {
-      return res.status(200).json({ message: "No work requests found for this client" });
+      return res.status(200).json({
+        message: "No work requests found for this client",
+        totalWorks: 0,
+        works: [],
+      });
     }
 
     const formattedWorks = works.map((work) => ({
@@ -36,9 +58,8 @@ exports.getAllWorks = async (req, res) => {
         phone: work.client?.phone,
       },
       assignedTechnician: work.assignedTechnician
-    
         ? {
-          technicianId: work.assignedTechnician._id,
+            technicianId: work.assignedTechnician._id,
             name: work.assignedTechnician.firstName,
             email: work.assignedTechnician.email,
             phone: work.assignedTechnician.phone,
@@ -53,12 +74,13 @@ exports.getAllWorks = async (req, res) => {
       totalWorks: works.length,
       works: formattedWorks,
     });
-    // console.log(res)
+
   } catch (err) {
     console.error("Get All Works Error:", err);
     res.status(500).json({ message: "Server error" });
   }
 };
+
 
 
 
