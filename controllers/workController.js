@@ -345,13 +345,13 @@ exports.bookTechnician = async (req, res) => {
       },
       {
         assignedTechnician: technicianId,
-        status: "approved"
+        status: "open"
       
 
       },
       { new: true }
     );
-  emitWorkStatus(lockedWork);
+  // emitWorkStatus(lockedWork);
     // if (!lockedWork) {
     //   return res.status(400).json({
     //     message: "This work has already been booked"
@@ -447,16 +447,15 @@ exports.bookTechnician = async (req, res) => {
 };
 
 
-
 exports.WorkStart = async (req, res) => {
   try {
     const { workId } = req.body;
     const technicianId = req.user._id;
-    // const beforePhoto = req.file;
+
     if (!workId) {
       return res.status(400).json({ message: "Work ID is required" });
     }
-    const gettoken=await Work.findById(workId).select("token")
+
     const work = await Work.findById(workId);
     if (!work) {
       return res.status(404).json({ message: "Work not found" });
@@ -466,74 +465,84 @@ exports.WorkStart = async (req, res) => {
       return res.status(403).json({ message: "You are not assigned to this work" });
     }
 
-   
-    // let beforePhotoUrl = "";
-    // if (beforePhoto) {
-     
-    //   const uploadRes = await uploadToCloudinary(beforePhoto.path, "work_before_photos");
-    //   beforePhotoUrl = uploadRes.secure_url;
+    const gettoken = await Work.findById(workId).select("token");
 
-    //   // OR if local:
-    //   // beforePhotoUrl = `/uploads/${beforePhoto.filename}`;
-    // }
+    // ✅ Get Files
+    const beforePhotos = req.files?.beforephotos || [];
+    const beforeVideo = req.files?.beforevideo?.[0] || null;
 
+    if (beforePhotos.length > 4) {
+      return res.status(400).json({ message: "Maximum 4 photos allowed" });
+    }
 
+    let photoUrls = [];
+    let videoUrl = "";
+
+    // ✅ Upload Photos (Parallel Upload - Fast 🚀)
+    if (beforePhotos.length > 0) {
+      const uploadPhotoPromises = beforePhotos.map(photo =>
+        uploadToCloudinary(photo.path, "work_before_photos")
+      );
+
+      const uploadedPhotos = await Promise.all(uploadPhotoPromises);
+      photoUrls = uploadedPhotos.map(file => file.secure_url);
+    }
+
+    // ✅ Upload Video
+    if (beforeVideo) {
+      const uploadRes = await uploadToCloudinary(
+        beforeVideo.path,
+        "work_before_videos"
+      );
+      videoUrl = uploadRes.secure_url;
+    }
+
+    // ✅ Update Work
     work.status = "inprogress";
     work.startedAt = new Date();
-    // work.beforephoto = beforePhotoUrl; 
-    await work.save(); 
-    
-emitWorkStatus(work);
-  // changeStatus(work);
-//     await sendNotification(
-//   work.client._id, 
-//   "client", 
-//   "Work Started", 
-//   `Technician has started your work: ${work.serviceType}`,
-//   "work_started",
-//   `work${gettoken.token}`
-// );
+    work.beforephotos = photoUrls;   // Array
+    work.beforevideo = videoUrl;     // String
+    await work.save();
 
+    // ✅ Update Technician Status
     await User.findByIdAndUpdate(technicianId, {
       technicianStatus: "inprogress",
       onDuty: true,
       availability: false,
     });
-// await sendNotification(
-//   technicianId,
-//   "technician",
-//   "Job Status Updated",
-//   `You have started work (${work.serviceType}).`,
-//   "info",
-//   `/technician/work/${work._id}`
-// );
 
-// await sendNotification(
-//   work.client,
-//   "client",
-//   "Work In Progress",
-//   `Your job (${work.serviceType}) has been marked as in-progress.`,
-//   "info",
-//   `/client/work/${work._id}`
-// );
-
-   
+    // ✅ Update Booking
     await Booking.findOneAndUpdate(
-      { technician: technicianId, user: work.client, status: { $in: ["open",  "on_the_way", "dispatch"] } },
+      {
+        technician: technicianId,
+        user: work.client,
+        status: { $in: ["open", "taken", "dispatch"] }
+      },
       { status: "inprogress" }
     );
 
+    // ✅ Send Notification
+    await sendNotification(
+      work.client._id,
+      "client",
+      "Work Started",
+      `Technician has started your work: ${work.serviceType}`,
+      "work_started",
+      `work${gettoken?.token || ""}`
+    );
+
     res.status(200).json({
-      message: "Technician started the work. Status set to in-progress.",
+      message: "Technician started the work successfully.",
+      photos: photoUrls,
+      video: videoUrl,
       work,
-      // beforePhoto: beforePhotoUrl,
     });
+
   } catch (err) {
     console.error("❌ Work Start Error:", err);
     res.status(500).json({ message: "Server error" });
   }
 };
-
 
 exports.updateLocation = async (req, res) => {
   try {
@@ -1381,78 +1390,97 @@ exports.rescheduleOrder = async (req, res) => {
       });
     }
 
-    // 🟢 Parse Date (same as createWork)
+    // 🟢 Parse Date safely
     const parsedDate = date ? parseClientDate(date) : null;
     if (date && !parsedDate) {
       return res.status(400).json({ message: "Invalid date format" });
     }
-
     if (parsedDate) parsedDate.objectDate.setHours(0, 0, 0, 0);
 
     // 🟢 Remove old technician
-    const oldTechnicianId = work.assignedTechnician;
+    const oldTechnicianId = work.assignedTechnician || work.technician;
     work.assignedTechnician = null;
+    work.technician = null;
 
     // 🟢 Update work fields
-    work.date = parsedDate ? parsedDate.objectDate : null;
-    work.formattedDate = parsedDate ? parsedDate.formatted : null;
+    work.date = parsedDate ? parsedDate.objectDate : work.date;
+    work.formattedDate = parsedDate ? parsedDate.formatted : work.formattedDate;
     work.status = "open";
     work.rescheduledAt = new Date();
 
     await work.save();
 
+    // 🔔 Notify old technician if exists
+    // if (oldTechnicianId) {
+    //   const message = "Client has rescheduled this job. This job is no longer active.";
+
+    //   await sendNotification(
+    //     oldTechnicianId,
+    //     "technician",
+    //     "Job Rescheduled",
+    //     message,
+    //     "job_rescheduled",
+    //     `work-${work._id}`
+    //   );
+
+    //   const technicianUser = await User.findById(oldTechnicianId).select("fcmToken");
+
+    //   if (technicianUser?.fcmToken) {
+    //     await admin.messaging().send({
+    //       token: technicianUser.fcmToken,
+    //       notification: { title: "Job Rescheduled", body: message },
+    //       data: { type: "JOB_RESCHEDULED", workId: work._id.toString() },
+    //     });
+    //   }
+    // }
+
     // ===============================
-    // 🔥 SAME TECHNICIAN MATCHING LOGIC
+    // 🔥 Technician Matching Logic
     // ===============================
 
-    const specs = work.specialization;
-
+    const specs = work.specialization || [];
     const technicians = await User.find({
       role: "technician",
       specialization: { $in: specs },
     });
 
+    // ✅ Get booked technicians on same date
     let bookedTechIds = [];
-
     if (parsedDate) {
       const dayStart = new Date(parsedDate.objectDate);
       dayStart.setHours(0, 0, 0, 0);
-
       const dayEnd = new Date(parsedDate.objectDate);
       dayEnd.setHours(23, 59, 59, 999);
 
       const bookedWorks = await Work.find({
-        _id: { $ne: work._id }, // 👈 current work exclude
+        _id: { $ne: work._id }, // exclude current work
         date: { $gte: dayStart, $lte: dayEnd },
         assignedTechnician: { $ne: null },
         status: { $in: ["open", "approved", "dispatch", "inprogress"] },
       }).select("assignedTechnician");
 
-      bookedTechIds = bookedWorks.map(w =>
-        w.assignedTechnician.toString()
-      );
+      bookedTechIds = bookedWorks.map(w => w.assignedTechnician.toString());
     }
 
-    const R = 6371;
+    // ✅ Calculate distance safely
     const matchingTechnicians = [];
+    const R = 6371;
 
     for (const tech of technicians) {
       if (!tech.coordinates?.lat || !tech.coordinates?.lng) continue;
       if (bookedTechIds.includes(tech._id.toString())) continue;
+      if (!work.coordinates?.lat || !work.coordinates?.lng) continue;
 
-      const dLat =
-        ((tech.coordinates.lat - work.coordinates.lat) * Math.PI) / 180;
-      const dLng =
-        ((tech.coordinates.lng - work.coordinates.lng) * Math.PI) / 180;
+      const dLat = ((tech.coordinates.lat - work.coordinates.lat) * Math.PI) / 180;
+      const dLng = ((tech.coordinates.lng - work.coordinates.lng) * Math.PI) / 180;
 
       const a =
         Math.sin(dLat / 2) ** 2 +
         Math.cos((work.coordinates.lat * Math.PI) / 180) *
-          Math.cos((tech.coordinates.lat * Math.PI) / 180) *
-          Math.sin(dLng / 2) ** 2;
+        Math.cos((tech.coordinates.lat * Math.PI) / 180) *
+        Math.sin(dLng / 2) ** 2;
 
-      const distance =
-        R * (2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)));
+      const distance = R * (2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)));
 
       if (distance <= 70) {
         matchingTechnicians.push({
@@ -1464,10 +1492,19 @@ exports.rescheduleOrder = async (req, res) => {
     }
 
     // ===============================
+    // 🔥 Emit Work Status safely
+    // ===============================
+    if (work && work._id) {
+      try {
+        emitWorkStatus(work);
+      } catch (err) {
+        console.error("EmitWorkStatus error:", err);
+      }
+    }
 
     return res.status(200).json({
       success: true,
-      message: "Work updated successfully",
+      message: "Work rescheduled successfully",
       work,
       matchingTechnicians,
     });
@@ -1477,6 +1514,7 @@ exports.rescheduleOrder = async (req, res) => {
     res.status(500).json({ message: "Server error" });
   }
 };
+
 
 
 

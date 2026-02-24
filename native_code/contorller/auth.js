@@ -110,6 +110,7 @@ exports.verifyPhoneOTP = async (req, res) => {
     user.isTemp = false;
     user.phoneOTP = undefined;
     user.phoneOTPExpires = undefined;
+    console.log(user)
     await user.save();
 
     const token = generateToken(user);
@@ -117,6 +118,7 @@ exports.verifyPhoneOTP = async (req, res) => {
     const responseData = {
       success: true,
       token,
+      user,
       message: "OTP verified successfully.",
       isProfileCompleted: !!user.isProfileCompleted,
     };

@@ -358,49 +358,133 @@ exports.getAvailableJobs = async (req, res) => {
 };
 
 
+// exports.approveJob = async (req, res) => {
+//   try {
+//     const technicianId = req.user._id;
+//     const { workId } = req.body;
+    
+//     const userId= await Work.findById(workId).select("client serviceCharge token");
+//     console.log(userId)
+//     const work = await Work.findById(workId);
+//     if (!work) return res.status(404).json({ message: "Work not found" });
+
+//     if (!work.assignedTechnician) {
+//       return res.status(400).json({ message: "No technician assigned to this work" });
+//     }
+
+//     // if (work.assignedTechnician.toString() !== technicianId.toString()) {
+//     //   return res.status(403).json({ message: "You are not authorized to approve this job" });
+//     // }
+
+//        work.status = "approved";
+// emitWorkStatus(work);
+//    await sendNotification(
+//   userId,
+//   "client",
+//   "Booking Confirmed",
+//   `Your technician ${technicianId.firstName} has been booked successfully.the service type is ${userId.serviceType}`,
+//   "booking_confirmed",
+//   `work-${userId.token}`
+// );
+// const clientUser = await User.findById(userId.client).select("fcmToken");
+// if (clientUser?.fcmToken) {
+//   await admin.messaging().send({
+//     token: clientUser.fcmToken,
+//     // notification: {
+//     //   title: "Booking Confirmed",
+//     //   body
+       
+//     // },
+//     data: {
+//       type: "Booking Confirmed",
+//       link: `work-${userId.token}`,
+//     },
+//   });
+// }
+//     res.status(200).json({
+//       success: true,
+//       message: "Job approved successfully",
+//       work,
+//     });
+
+//   } catch (error) {
+//     console.error("Approve job error:", error);
+//     res.status(500).json({ message: "Server error" });
+//   }
+// };
 exports.approveJob = async (req, res) => {
   try {
+
     const technicianId = req.user._id;
     const { workId } = req.body;
-    
-    const userId= await Work.findById(workId).select("client serviceCharge token");
-    console.log(userId)
-    const work = await Work.findById(workId);
-    if (!work) return res.status(404).json({ message: "Work not found" });
+
+    const userId = await Work.findById(workId).select("client serviceType token");
+    console.log(userId);
+
+    const work = await Work.findById(workId).populate("assignedTechnician");
+
+    if (!work) {
+      return res.status(404).json({ message: "Work not found" });
+    }
 
     if (!work.assignedTechnician) {
       return res.status(400).json({ message: "No technician assigned to this work" });
     }
 
-    // if (work.assignedTechnician.toString() !== technicianId.toString()) {
-    //   return res.status(403).json({ message: "You are not authorized to approve this job" });
-    // }
+    // 🔁 UPDATE STATUS
+    work.status = "approved";
+    await work.save();
 
-       work.status = "approved";
-emitWorkStatus(work);
-   await sendNotification(
-  userId,
-  "client",
-  "Booking Confirmed",
-  `Your technician ${technicianId.firstName} has been booked successfully.the service type is ${userId.serviceType}`,
-  "booking_confirmed",
-  `work-${userId.token}`
-);
-const clientUser = await User.findById(userId.client).select("fcmToken");
-if (clientUser?.fcmToken) {
-  await admin.messaging().send({
-    token: clientUser.fcmToken,
-    notification: {
-      title: "Booking Confirmed",
-      body: `Your technician ${technicianId.firstName} has been Approved your request service type: ${userId.serviceType}`,
- 
-    },
-    data: {
-      type: "Booking Confirmed",
-      link: `work-${userId.token}`,
-    },
-  });
-}
+    // 🔁 SOCKET EMIT SAME
+    emitWorkStatus(work);
+
+    // 🔁 OLD NOTIFICATION SAME
+    await sendNotification(
+      userId,
+      "client",
+      "Booking Confirmed",
+      `Your technician ${work.assignedTechnician.firstName} has been booked successfully. The service type is ${userId.serviceType}`,
+      "booking_confirmed",
+      `work-${userId.token}`
+    );
+
+    // 🔥 CLIENT FIND
+    const clientUser = await User.findById(userId.client).select("fcmToken");
+
+    /**
+     * 🔥 CUSTOM FCM PUSH (WORK_APPROVED)
+     */
+    if (clientUser?.fcmToken) {
+
+      await admin.messaging().send({
+        token: clientUser.fcmToken,
+
+        android: {
+          priority: "high",
+        },
+
+        data: {
+          // 👇 FRONTEND MATCHING KEYS
+          title: "Work Approved",
+          body: "Technician has approved your service request",
+
+          role: "CLIENT",
+          type: "WORK_APPROVED",
+
+          service: userId.serviceType || "Service",
+          technicianName: work.assignedTechnician.firstName || "Technician",
+          eta: "30 mins",
+
+          phone: work.assignedTechnician.phone || "",
+
+          workId: work._id.toString()
+        },
+      });
+
+      console.log("✅ WORK_APPROVED PUSH SENT");
+
+    }
+
     res.status(200).json({
       success: true,
       message: "Job approved successfully",
@@ -491,7 +575,7 @@ exports.getAllTechnicianWorks = async (req, res) => {
       categorized,
     });
   } catch (error) {
-    console.error("❌ Error fetching all technician works:", error);
+    console.error(" Error fetching all technician works:", error);
     res.status(500).json({
       success: false,
       message: "Error fetching technician works",
@@ -617,7 +701,7 @@ if (clientUser?.fcmToken) {
 exports.raiseWorkIssue = async (req, res) => {
   try {
     const { workId, issueType, remarks, specializationRequired, reason } = req.body;
-    
+    console.log(req.body)
     const technicianId =
       req.user && req.user._id ? req.user._id : req.body.technicianId;
 

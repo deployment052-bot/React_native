@@ -7,84 +7,99 @@
   const { io, userSockets } = require("../server"); 
 
 
+// import { sendPush } from "../utils/";
 
+// await sendPush(
+//   client.fcmTokens || [],
+//   "Work Approved",
+//   "Technician has approved your work",
+//   {
+//     type: "job_approved",
+//     workId: work._id.toString(),
+//   }
+// );
 
   exports.sendNotification = async (
-    userId,
-    role,
-    title,
-    message,
-    type = "info",
-    link = ""
-  ) => {
-    try {
-      
-      const notification = new Notification({
-        user: userId,
-        role,
-        title,
-        message,
-        type,
-        link,
-      });
-      await notification.save();
+  userId,
+  role,
+  title,
+  message,
+  type = "client_channel",
+  link = ""
+) => {
+  try {
+   
+    const notification = new Notification({
+      user: userId,
+      role,
+      title,
+      message,
+      type,
+      link,
+    });
 
-    
-      await User.findByIdAndUpdate(userId, {
-        $inc: { notificationCount: 1 },
-      });
+    await notification.save();
 
-    
-      const user = await User.findById(userId).select("fcmToken");
+    await User.findByIdAndUpdate(userId, {
+      $inc: { notificationCount: 1 },
+    });
 
-      if (user?.fcmToken) {
-        try {
-          await admin.messaging().send({
-            token: user.fcmToken,
-            notification: {
-              title,
-              body: message,
-              // msg,
-            },
-            data: {
-              type,
-              link,
-            },
-          });
-        } catch (err) {
-          console.error("FCM Error:", err.message);
+   
+    const user = await User.findById(userId).select("fcmToken");
 
+    if (user?.fcmToken) {
+      try {
+        await admin.messaging().send({
+          token: user.fcmToken,
+          notification: {
+            title: title,
+            body: message,
+          },
+          android: {
+            priority: "high",
+          },
+          // data: {
+          //   type: String(type),
+          //   link: String(link),
+          // },
           
-          if (
-            err.code === "messaging/registration-token-not-registered" ||
-            err.code === "messaging/invalid-registration-token"
-          ) {
-            await User.findByIdAndUpdate(userId, {
-              $unset: { fcmToken: "" },
-            });
-          }
+    data: {
+      ...Object.fromEntries(
+        Object.entries(data).map(([k, v]) => [k, String(v)])
+      ),
+      title,
+      body,
+    },
+        });
+
+        console.log("✅ Push notification sent");
+      } catch (err) {
+        console.error("❌ FCM Error:", err.message);
+
+
+        if (
+          err.code === "messaging/registration-token-not-registered" ||
+          err.code === "messaging/invalid-registration-token"
+        ) {
+          await User.findByIdAndUpdate(userId, {
+            $unset: { fcmToken: "" },
+          });
         }
       }
-
-    const sockets = userSockets?.[userId];
-
-if (Array.isArray(sockets)) {
-  sockets.forEach(socketId => {
-    io.to(socketId).emit("new-notification", notification);
-  });
-}
-
-      sockets.forEach((socketId) => {
-        io.to(socketId).emit("new-notification", notification);
-      });
-
-      return notification;
-    } catch (err) {
-      console.error("Notification Error:", err);
-      throw err;
     }
-  };
 
+    const sockets = userSockets?.[userId] || [];
+
+    sockets.forEach((socketId) => {
+      io.to(socketId).emit("new-notification", notification);
+    });
+
+    return notification;
+  } catch (err) {
+    console.error("Notification Error:", err);
+    throw err;
+  }
+};
   // exports.sendNotification = async (
   //   userId,
   //   role,
@@ -234,5 +249,3 @@ if (Array.isArray(sockets)) {
       res.status(500).json({ success: false, message: "Server error" });
     }
   };
-
-

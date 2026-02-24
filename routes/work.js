@@ -27,8 +27,7 @@ router.post('/work/create', protect, createWork);
 
 router.post('/work/book-technician', protect, bookTechnician);
 
-
-router.post('/work/start', protect,upload.single("beforephoto"), authorize('technician'), WorkStart);
+router.post('/work/start',protect,upload.fields([{ name: "beforephotos", maxCount: 4 },{ name: "beforevideo", maxCount: 1 }]),authorize('technician'),WorkStart);
 // router.post('/work/complete-1', protect, upload.single("afterphoto"),authorize('technician'),  WorkComplete  );
 
 router.post('/work/complete', protect, authorize('technician'),upload.single("afterphoto"), completeWorkAndGenerateBill  );

@@ -30,7 +30,9 @@ const fileFilter = (req, file, cb) => {
     "image/jpg",
     "image/webp",
     "image/jfif",
-    "application/pdf",
+    "video/mp4",
+    "video/mov",
+    "video/quicktime"
   ];
 
   const allowedExt = [
@@ -39,7 +41,8 @@ const fileFilter = (req, file, cb) => {
     ".png",
     ".webp",
     ".jfif",
-    ".pdf",
+    ".mp4",
+    ".mov"
   ];
 
   const ext = path.extname(file.originalname).toLowerCase();
@@ -50,12 +53,7 @@ const fileFilter = (req, file, cb) => {
   ) {
     cb(null, true);
   } else {
-    cb(
-      new Error(
-        "Only image (jpg, jpeg, png, webp, jfif) and PDF files are allowed"
-      ),
-      false
-    );
+    cb(new Error("Only images (max 4) and 1 video allowed"), false);
   }
 };
 
